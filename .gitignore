@@ -1,0 +1,8 @@
+settings.ini
+data.json
+*.log
+log/
+nohup.out
+__pycache__/
+*.pyc
+.env
