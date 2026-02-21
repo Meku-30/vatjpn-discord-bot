@@ -7,7 +7,8 @@ import configparser
 import re
 import traceback
 import os
-from datetime import datetime, timezone
+import sqlite3
+from datetime import datetime, timezone, timedelta
 
 # load config
 config = configparser.ConfigParser()
@@ -23,9 +24,49 @@ discord_channel_id = int(config["DISCORD_CONFIG"]["discord_channel_id"])
 
 data_filename = config["DATAFILE_CONFIG"]["data_filename"]
 nickname_filename = config.get("DATAFILE_CONFIG", "nickname_filename", fallback="nicknames.json")
+stats_db_filename = config.get("DATAFILE_CONFIG", "stats_db_filename", fallback="stats.db")
 
 
 
+
+def init_db():
+    conn = sqlite3.connect(stats_db_filename)
+    c = conn.cursor()
+    c.execute("""CREATE TABLE IF NOT EXISTS sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        cid INTEGER,
+        callsign TEXT,
+        rating INTEGER,
+        logon_time TEXT,
+        logoff_time TEXT,
+        duration_seconds INTEGER
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_logoff_time ON sessions(logoff_time)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_callsign ON sessions(callsign)")
+    conn.commit()
+    conn.close()
+
+def log_session(atc_info):
+    logon_time_str = atc_info.get("logon_time", "")
+    logoff_time = datetime.now(timezone.utc)
+    duration_seconds = 0
+    if logon_time_str:
+        try:
+            logon_time = datetime.fromisoformat(logon_time_str.replace("Z", "+00:00"))
+            duration_seconds = int((logoff_time - logon_time).total_seconds())
+        except (ValueError, TypeError):
+            pass
+    conn = sqlite3.connect(stats_db_filename)
+    c = conn.cursor()
+    c.execute(
+        "INSERT INTO sessions (cid, callsign, rating, logon_time, logoff_time, duration_seconds) VALUES (?, ?, ?, ?, ?, ?)",
+        (atc_info["cid"], atc_info["callsign"], atc_info["rating"],
+         logon_time_str, logoff_time.isoformat(), duration_seconds)
+    )
+    conn.commit()
+    conn.close()
+
+init_db()
 
 rating_list = ["Unknown", "OBS", "S1", "S2", "S3", "C1", "C2", "C3", "I1", "I2", "I3", "SUP", "ADM"]
 
@@ -143,6 +184,7 @@ async def run():
                 await channel.send(embed = get_discord_embed('connect', connected_controllers[a], all_controllers))
             for a in disconnected_controllers:
                 await channel.send(embed = get_discord_embed('disconnect', disconnected_controllers[a], all_controllers))
+                log_session(disconnected_controllers[a])
 
         except Exception as e:
                 traceback.print_exc()
@@ -218,6 +260,107 @@ async def nickname_list(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed)
 
 tree.add_command(nickname_group)
+
+def format_duration_seconds(total_seconds):
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, _ = divmod(remainder, 60)
+    if hours > 0:
+        return f"{hours}時間{minutes:02d}分"
+    return f"{minutes}分"
+
+@tree.command(name="stats", description="日本空域の管制統計を表示")
+@app_commands.describe(
+    period="集計期間",
+    position="ポジションフィルター（部分一致、例: RJTT）"
+)
+@app_commands.choices(period=[
+    app_commands.Choice(name="今日", value="today"),
+    app_commands.Choice(name="今週", value="week"),
+    app_commands.Choice(name="今月", value="month"),
+    app_commands.Choice(name="今年", value="year"),
+    app_commands.Choice(name="全期間", value="all"),
+])
+async def stats_command(interaction: discord.Interaction, period: app_commands.Choice[str], position: str = None):
+    await interaction.response.defer()
+    try:
+        now = datetime.now(timezone.utc)
+        if period.value == "today":
+            start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        elif period.value == "week":
+            start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+        elif period.value == "month":
+            start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        elif period.value == "year":
+            start = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        else:
+            start = None
+
+        conn = sqlite3.connect(stats_db_filename)
+        c = conn.cursor()
+
+        query = "SELECT cid, callsign, duration_seconds FROM sessions WHERE 1=1"
+        params = []
+        if start:
+            query += " AND logoff_time >= ?"
+            params.append(start.isoformat())
+        if position:
+            query += " AND callsign LIKE ?"
+            params.append(f"%{position}%")
+
+        c.execute(query, params)
+        rows = c.fetchall()
+        conn.close()
+
+        if not rows:
+            await interaction.followup.send(f"📊 **VATJPN 管制統計 ({period.name})**\n\nデータがありません。")
+            return
+
+        total_sessions = len(rows)
+        total_duration = sum(r[2] for r in rows)
+
+        # ポジション別集計
+        pos_stats = {}
+        for _, callsign, duration in rows:
+            if callsign not in pos_stats:
+                pos_stats[callsign] = {"duration": 0, "count": 0}
+            pos_stats[callsign]["duration"] += duration
+            pos_stats[callsign]["count"] += 1
+        pos_ranking = sorted(pos_stats.items(), key=lambda x: x[1]["duration"], reverse=True)[:10]
+
+        # 管制官別集計
+        ctrl_stats = {}
+        for cid, _, duration in rows:
+            if cid not in ctrl_stats:
+                ctrl_stats[cid] = {"duration": 0, "count": 0}
+            ctrl_stats[cid]["duration"] += duration
+            ctrl_stats[cid]["count"] += 1
+        ctrl_ranking = sorted(ctrl_stats.items(), key=lambda x: x[1]["duration"], reverse=True)[:10]
+
+        pos_lines = []
+        for callsign, data in pos_ranking:
+            pos_lines.append(f"`{callsign}` - {format_duration_seconds(data['duration'])} ({data['count']}回)")
+
+        ctrl_lines = []
+        for cid, data in ctrl_ranking:
+            name = get_display_name(cid)
+            ctrl_lines.append(f"{name} - {format_duration_seconds(data['duration'])} ({data['count']}回)")
+
+        description = f"セッション数: **{total_sessions}**\n合計管制時間: **{format_duration_seconds(total_duration)}**"
+
+        embed = discord.Embed(
+            title=f"📊 VATJPN 管制統計 ({period.name})",
+            color=0x00bfff,
+            description=description
+        )
+        if pos_lines:
+            embed.add_field(name="【ポジション別】", value='\n'.join(pos_lines), inline=False)
+        if ctrl_lines:
+            embed.add_field(name="【管制官別】", value='\n'.join(ctrl_lines), inline=False)
+
+        await interaction.followup.send(embed=embed)
+    except Exception as e:
+        traceback.print_exc()
+        await interaction.followup.send(f"エラーが発生しました: {e}")
 
 @client.event
 async def on_ready():

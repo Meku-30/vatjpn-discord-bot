@@ -9,3 +9,4 @@ discord_channel_id=YOUR_CHANNEL_ID
 [DATAFILE_CONFIG]
 data_filename=data.json
 nickname_filename=nicknames.json
+stats_db_filename=stats.db

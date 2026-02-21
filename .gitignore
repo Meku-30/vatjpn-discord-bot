@@ -7,4 +7,5 @@ __pycache__/
 *.pyc
 .env
 nicknames.json
+stats.db
 user_list.csv
