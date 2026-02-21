@@ -270,30 +270,19 @@ def format_duration_seconds(total_seconds):
 
 @tree.command(name="stats", description="日本空域の管制統計を表示")
 @app_commands.describe(
-    period="集計期間",
+    days="集計日数（0=全期間、1=過去1日、7=過去7日 等）",
     position="ポジションフィルター（部分一致、例: RJTT）"
 )
-@app_commands.choices(period=[
-    app_commands.Choice(name="今日", value="today"),
-    app_commands.Choice(name="今週", value="week"),
-    app_commands.Choice(name="今月", value="month"),
-    app_commands.Choice(name="今年", value="year"),
-    app_commands.Choice(name="全期間", value="all"),
-])
-async def stats_command(interaction: discord.Interaction, period: app_commands.Choice[str], position: str = None):
+async def stats_command(interaction: discord.Interaction, days: int = 7, position: str = None):
     await interaction.response.defer()
     try:
         now = datetime.now(timezone.utc)
-        if period.value == "today":
-            start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        elif period.value == "week":
-            start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
-        elif period.value == "month":
-            start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        elif period.value == "year":
-            start = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        if days > 0:
+            start = (now - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
+            period_label = f"過去{days}日間"
         else:
             start = None
+            period_label = "全期間"
 
         conn = sqlite3.connect(stats_db_filename)
         c = conn.cursor()
@@ -312,7 +301,7 @@ async def stats_command(interaction: discord.Interaction, period: app_commands.C
         conn.close()
 
         if not rows:
-            await interaction.followup.send(f"📊 **VATJPN 管制統計 ({period.name})**\n\nデータがありません。")
+            await interaction.followup.send(f"📊 **VATJPN 管制統計 ({period_label})**\n\nデータがありません。")
             return
 
         total_sessions = len(rows)
@@ -348,7 +337,7 @@ async def stats_command(interaction: discord.Interaction, period: app_commands.C
         description = f"セッション数: **{total_sessions}**\n合計管制時間: **{format_duration_seconds(total_duration)}**"
 
         embed = discord.Embed(
-            title=f"📊 VATJPN 管制統計 ({period.name})",
+            title=f"📊 VATJPN 管制統計 ({period_label})",
             color=0x00bfff,
             description=description
         )
@@ -366,8 +355,10 @@ async def stats_command(interaction: discord.Interaction, period: app_commands.C
 async def on_ready():
     print(f'Logged in as {client.user}')
     try:
-        synced = await tree.sync()
-        print(f'Synced {len(synced)} slash command(s)')
+        for guild in client.guilds:
+            tree.copy_global_to(guild=guild)
+            synced = await tree.sync(guild=guild)
+            print(f'Synced {len(synced)} slash command(s) to {guild.name}')
     except Exception as e:
         print(f'Failed to sync slash commands: {e}')
     # 二重起動防止：すでにループが走っていないか確認
