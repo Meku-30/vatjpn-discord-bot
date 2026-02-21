@@ -355,10 +355,15 @@ async def stats_command(interaction: discord.Interaction, days: int = 7, positio
 async def on_ready():
     print(f'Logged in as {client.user}')
     try:
+        # ギルドごとに同期
         for guild in client.guilds:
             tree.copy_global_to(guild=guild)
             synced = await tree.sync(guild=guild)
             print(f'Synced {len(synced)} slash command(s) to {guild.name}')
+        # 古いグローバルコマンドをクリア
+        tree.clear_commands(guild=None)
+        await tree.sync()
+        print('Cleared global commands')
     except Exception as e:
         print(f'Failed to sync slash commands: {e}')
     # 二重起動防止：すでにループが走っていないか確認
