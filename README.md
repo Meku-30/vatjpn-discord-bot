@@ -1,30 +1,82 @@
-This program is **discord bot client for VATSIM ATC status**.
+# VATJPN Discord Bot
 
-- it polls periodically from vatsim stat json
-- and check ATC connection status by checking differences between old and new one.
+VATSIM 日本空域の ATC 管制官のオンライン/オフライン状況を Discord チャンネルに通知する Bot。
 
-# Slash Commands
+- VATSIM Data API を15秒間隔でポーリング
+- 日本空域 (RJ*, ROAH, OKA, FUK, KOJ, TYO, HDK, SRK, VATJ 等) のコントローラーを監視
+- ログイン/ログアウト時に Discord Embed で通知
 
-| Command | Description |
-|---------|-------------|
-| `/online` | Show currently online controllers in Japanese airspace |
-| `/nickname add <cid> <name>` | Register a nickname for a VATSIM CID |
-| `/nickname remove <cid>` | Remove a registered nickname |
-| `/nickname list` | Show all registered nicknames |
+## スラッシュコマンド / Slash Commands
 
-# Features
+| コマンド | 説明 |
+|---------|------|
+| `/online` | 日本空域のオンライン管制官を一覧表示 |
+| `/nickname add <cid> <name>` | VATSIM CID にニックネームを登録 |
+| `/nickname remove <cid>` | ニックネームを削除 |
+| `/nickname list` | 登録済みニックネーム一覧 |
 
-- **Login/Logout notifications** - Automatic embed messages when controllers connect/disconnect
-- **Connection duration** - Shows how long a controller has been online (on both login and logout notifications)
-- **CID nicknames** - Map VATSIM CIDs to friendly names, displayed in notifications and `/online`
+## 機能 / Features
 
-# How to use
-- install python module discord.py (pip install discord.py)
-- generate vatsim_stat_notify_to_discord.py file. (or git clone)
-- edit settings.ini file (edit ATC callsign prefix, discord bot token, discord channel id)
-- set DISCORD_BOT_TOKEN environment variable (or add to settings.ini)
-- run in foreground: python vatsim_stat_notify_to_discord.py
-- run in background: nohup python vatsim_stat_notify_to_discord.py &
+- **ログイン/ログアウト通知** - 管制官の接続・切断時に Embed メッセージで自動通知
+- **接続時間表示** - ログイン/ログアウト通知に管制官の接続時間を表示
+- **CID ニックネーム** - VATSIM CID にフレンドリーな名前を紐付け、通知や `/online` で表示
 
-# Contact
-- If you wanna modify or add some features, plz contact me or send git pull request.
+## セットアップ / Setup
+
+### 1. Bot Token の設定
+
+[Discord Developer Portal](https://discord.com/developers/applications) で Bot を作成し、Token を取得する。
+
+**環境変数で設定（推奨）:**
+```bash
+export DISCORD_BOT_TOKEN="your-bot-token-here"
+```
+
+**Docker (docker-compose) の場合:**
+`.env` ファイルに記載する（docker-compose.yml と同じディレクトリに配置）:
+```
+DISCORD_BOT_TOKEN=your-bot-token-here
+```
+
+### 2. settings.ini の設定
+
+`settings.ini.example` をコピーして `settings.ini` を作成:
+```bash
+cp settings.ini.example settings.ini
+```
+
+`discord_channel_id` に通知先の Discord チャンネル ID を設定する。
+
+### 3. 起動
+
+```bash
+# ローカル実行
+pip install -r requirements.txt
+python vatsim_stat_notify_to_discord.py
+
+# バックグラウンド実行
+nohup python vatsim_stat_notify_to_discord.py &
+```
+
+### Docker Compose
+
+```yaml
+services:
+  discord-bot:
+    image: python:3.11-slim
+    working_dir: /app
+    volumes:
+      - ./:/app
+    environment:
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
+    command: sh -c "pip install -r requirements.txt && python -u vatsim_stat_notify_to_discord.py"
+    restart: always
+```
+
+## Credits
+
+Based on [lancard/vatsim_stat_notify_to_discord](https://github.com/lancard/vatsim_stat_notify_to_discord) (GPL-3.0).
+
+## License
+
+This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
