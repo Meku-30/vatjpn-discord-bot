@@ -30,4 +30,4 @@ services:
 
 ## Credits
 
-Based on [lancard/vatsim_stat_notify_to_discord](https://github.com/lancard/vatsim_stat_notify_to_discord) (GPL-3.0).
+Based on [lancard/vatsim_stat_notify_to_discord](https://github.com/lancard/vatsim_stat_notify_to_discord) (GPL-3.0, 現在は非公開).
