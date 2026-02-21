@@ -283,6 +283,8 @@ async def stats_command(interaction: discord.Interaction, days: int = 7, positio
         else:
             start = None
             period_label = "全期間"
+        if position:
+            period_label += f" | {position}"
 
         conn = sqlite3.connect(stats_db_filename)
         c = conn.cursor()
