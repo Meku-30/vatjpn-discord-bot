@@ -105,7 +105,9 @@ def format_online_entry(atc_info):
     callsign = atc_info["callsign"]
     freq = f"({atc_info['frequency']})" if atc_info["frequency"] != "199.998" else ""
     name = get_display_name(atc_info["cid"])
-    return f"{callsign}{freq} - {name}"
+    duration = format_duration(atc_info.get("logon_time", "")) if atc_info.get("logon_time") else ""
+    duration_str = f" [{duration}]" if duration else ""
+    return f"{callsign}{freq} - {name}{duration_str}"
 
 def get_discord_embed(connect_type, atc_info, current_list):
     online_entries = [format_online_entry(current_list[d]) for d in current_list]
@@ -116,8 +118,6 @@ def get_discord_embed(connect_type, atc_info, current_list):
         embed.add_field(name='Rating', value=rating_list[atc_info["rating"]])
         embed.add_field(name='CID', value=display_name)
         embed.add_field(name='Server', value=atc_info["server"])
-        if atc_info.get("logon_time"):
-            embed.add_field(name='接続時間', value=format_duration(atc_info["logon_time"]))
         return embed
 
     if connect_type == "disconnect":
