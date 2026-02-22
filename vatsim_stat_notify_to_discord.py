@@ -478,14 +478,17 @@ async def stats_command(interaction: discord.Interaction, days: int = 7, positio
             ctrl_stats[cid]["count"] += 1
         ctrl_ranking = sorted(ctrl_stats.items(), key=lambda x: x[1]["duration"], reverse=True)[:10]
 
+        rank_medal = ["🥇", "🥈", "🥉"]
         pos_lines = []
-        for callsign, data in pos_ranking:
-            pos_lines.append(f"`{callsign}` - {format_duration_seconds(data['duration'])} ({data['count']}回)")
+        for i, (callsign, data) in enumerate(pos_ranking):
+            prefix = rank_medal[i] if i < 3 else f"`{i+1}.`"
+            pos_lines.append(f"{prefix} `{callsign}` - {format_duration_seconds(data['duration'])} ({data['count']}回)")
 
         ctrl_lines = []
-        for cid, data in ctrl_ranking:
+        for i, (cid, data) in enumerate(ctrl_ranking):
+            prefix = rank_medal[i] if i < 3 else f"`{i+1}.`"
             name = get_display_name(cid)
-            ctrl_lines.append(f"{name} - {format_duration_seconds(data['duration'])} ({data['count']}回)")
+            ctrl_lines.append(f"{prefix} {name} - {format_duration_seconds(data['duration'])} ({data['count']}回)")
 
         description = f"セッション数: **{total_sessions}**\n合計管制時間: **{format_duration_seconds(total_duration)}**"
 
