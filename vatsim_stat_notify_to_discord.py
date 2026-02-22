@@ -307,6 +307,113 @@ async def nickname_list(interaction: discord.Interaction):
 
 bot.tree.add_command(nickname_group)
 
+@bot.tree.command(name="sup", description="オンラインのSupervisor一覧を表示")
+async def sup_command(interaction: discord.Interaction):
+    await interaction.response.defer()
+    try:
+        async with bot.http_session.get(vatsim_stat_json_url) as resp:
+            vatsim_info = await resp.json()
+        controllers = vatsim_info.get("controllers", [])
+        sups = [c for c in controllers if c["rating"] >= 11]
+
+        if not sups:
+            await interaction.followup.send("現在、オンラインのSupervisorはいません。")
+            return
+
+        sups.sort(key=lambda c: c["callsign"])
+        lines = []
+        for c in sups:
+            freq = f" ({c['frequency']})" if c["frequency"] != "199.998" else ""
+            duration = format_duration(c.get("logon_time", ""))
+            lines.append(f"**{c['callsign']}**{freq}\n  {rating_list[c['rating']]} | {c['name']} | {duration}")
+
+        embed = discord.Embed(
+            title="Online Supervisors",
+            color=0xff6600,
+            description='\n'.join(lines)
+        )
+        embed.set_footer(text=f"Total: {len(sups)} supervisor(s)")
+        await interaction.followup.send(embed=embed)
+    except Exception as e:
+        traceback.print_exc()
+        await interaction.followup.send(f"エラーが発生しました: {e}")
+
+@bot.tree.command(name="traffic", description="指定空港の発着予定トラフィック一覧")
+@app_commands.describe(icao="空港のICAOコード（例: RJTT）")
+async def traffic_command(interaction: discord.Interaction, icao: str):
+    await interaction.response.defer()
+    try:
+        icao = icao.upper()
+        async with bot.http_session.get(vatsim_stat_json_url) as resp:
+            vatsim_info = await resp.json()
+
+        pilots = vatsim_info.get("pilots", [])
+        prefiles = vatsim_info.get("prefiles", [])
+
+        departures = []
+        arrivals = []
+        for p in pilots:
+            fp = p.get("flight_plan")
+            if not fp:
+                continue
+            if fp.get("departure") == icao:
+                departures.append(p)
+            if fp.get("arrival") == icao:
+                arrivals.append(p)
+
+        prefiled = []
+        for p in prefiles:
+            fp = p.get("flight_plan")
+            if not fp:
+                continue
+            if fp.get("departure") == icao or fp.get("arrival") == icao:
+                prefiled.append(p)
+
+        if not departures and not arrivals and not prefiled:
+            await interaction.followup.send(f"**{icao}** に関連するトラフィックはありません。")
+            return
+
+        embed = discord.Embed(
+            title=f"{icao} Traffic",
+            color=0x0099ff,
+        )
+
+        if departures:
+            dep_lines = []
+            for p in sorted(departures, key=lambda x: x["callsign"]):
+                fp = p["flight_plan"]
+                alt = f"FL{int(p['altitude']) // 100}" if p.get("altitude", 0) > 10000 else f"{p.get('altitude', 0)}ft"
+                gs = p.get("groundspeed", 0)
+                status = f"{alt} / {gs}kt" if gs > 50 else "Gate/Taxi"
+                dep_lines.append(f"**{p['callsign']}** ({fp.get('aircraft_short', fp.get('aircraft_faa', '?'))})\n  → {fp.get('arrival', '?')} | {status}")
+            embed.add_field(name=f"Departures ({len(departures)})", value='\n'.join(dep_lines[:15]), inline=False)
+
+        if arrivals:
+            arr_lines = []
+            for p in sorted(arrivals, key=lambda x: x["callsign"]):
+                fp = p["flight_plan"]
+                alt = f"FL{int(p['altitude']) // 100}" if p.get("altitude", 0) > 10000 else f"{p.get('altitude', 0)}ft"
+                gs = p.get("groundspeed", 0)
+                status = f"{alt} / {gs}kt" if gs > 50 else "Arrived/Taxi"
+                arr_lines.append(f"**{p['callsign']}** ({fp.get('aircraft_short', fp.get('aircraft_faa', '?'))})\n  {fp.get('departure', '?')} → | {status}")
+            embed.add_field(name=f"Arrivals ({len(arrivals)})", value='\n'.join(arr_lines[:15]), inline=False)
+
+        if prefiled:
+            pre_lines = []
+            for p in sorted(prefiled, key=lambda x: x["callsign"]):
+                fp = p["flight_plan"]
+                dep = fp.get("departure", "?")
+                arr = fp.get("arrival", "?")
+                pre_lines.append(f"**{p['callsign']}** ({fp.get('aircraft_short', fp.get('aircraft_faa', '?'))}) {dep} → {arr}")
+            embed.add_field(name=f"Prefiled ({len(prefiled)})", value='\n'.join(pre_lines[:10]), inline=False)
+
+        total = len(departures) + len(arrivals) + len(prefiled)
+        embed.set_footer(text=f"Total: {total} flight(s)")
+        await interaction.followup.send(embed=embed)
+    except Exception as e:
+        traceback.print_exc()
+        await interaction.followup.send(f"エラーが発生しました: {e}")
+
 @bot.tree.command(name="stats", description="日本空域の管制統計を表示")
 @app_commands.describe(
     days="集計日数（0=全期間、1=過去1日、7=過去7日 等）",
