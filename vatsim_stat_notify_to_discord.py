@@ -1,37 +1,59 @@
 import discord
 from discord import app_commands
+from discord.ext import tasks
+import aiohttp
 import asyncio
-import requests
 import json
 import configparser
 import re
 import traceback
 import os
+import sys
 import sqlite3
 from datetime import datetime, timezone, timedelta
 
-# load config
+# ── Config validation ──────────────────────────────────────────────
+
 config = configparser.ConfigParser()
-config.read("settings.ini")
+if not config.read("settings.ini"):
+    print("ERROR: settings.ini が見つかりません。settings.ini.example をコピーして設定してください。")
+    sys.exit(1)
+
+REQUIRED_CONFIG = {
+    "VATSIM_CONFIG": ["vatsim_stat_json_url", "vatsim_stat_retrieve_period", "vatsim_controller_callsign_filter_regex"],
+    "DISCORD_CONFIG": ["discord_channel_id"],
+    "DATAFILE_CONFIG": ["data_filename"],
+}
+for section, keys in REQUIRED_CONFIG.items():
+    if not config.has_section(section):
+        print(f"ERROR: settings.ini にセクション [{section}] がありません。")
+        sys.exit(1)
+    for key in keys:
+        if not config.has_option(section, key):
+            print(f"ERROR: settings.ini の [{section}] にキー '{key}' がありません。")
+            sys.exit(1)
 
 vatsim_stat_json_url = config["VATSIM_CONFIG"]["vatsim_stat_json_url"]
 vatsim_stat_retrieve_period = float(config["VATSIM_CONFIG"]["vatsim_stat_retrieve_period"])
 vatsim_controller_callsign_filter_regex = config["VATSIM_CONFIG"]["vatsim_controller_callsign_filter_regex"]
 pattern = re.compile(vatsim_controller_callsign_filter_regex)
 
-discord_bot_client_token = os.environ.get("DISCORD_BOT_TOKEN") or config["DISCORD_CONFIG"]["discord_bot_client_token"]
+discord_bot_client_token = os.environ.get("DISCORD_BOT_TOKEN") or config.get("DISCORD_CONFIG", "discord_bot_client_token", fallback=None)
+if not discord_bot_client_token:
+    print("ERROR: DISCORD_BOT_TOKEN 環境変数または settings.ini の discord_bot_client_token を設定してください。")
+    sys.exit(1)
 discord_channel_id = int(config["DISCORD_CONFIG"]["discord_channel_id"])
 
 data_filename = config["DATAFILE_CONFIG"]["data_filename"]
 nickname_filename = config.get("DATAFILE_CONFIG", "nickname_filename", fallback="nicknames.json")
 stats_db_filename = config.get("DATAFILE_CONFIG", "stats_db_filename", fallback="stats.db")
 
-
-
+# ── SQLite ─────────────────────────────────────────────────────────
 
 def init_db():
     conn = sqlite3.connect(stats_db_filename)
     c = conn.cursor()
+    c.execute("PRAGMA journal_mode=WAL")
     c.execute("""CREATE TABLE IF NOT EXISTS sessions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         cid INTEGER,
@@ -68,11 +90,52 @@ def log_session(atc_info):
 
 init_db()
 
+# ── Constants ──────────────────────────────────────────────────────
+
 rating_list = ["Unknown", "OBS", "S1", "S2", "S3", "C1", "C2", "C3", "I1", "I2", "I3", "SUP", "ADM"]
 
-intents = discord.Intents.default()
-client = discord.Client(intents=intents)
-tree = app_commands.CommandTree(client)
+# ── Bot class ──────────────────────────────────────────────────────
+
+class VATJPNBot(discord.Client):
+    def __init__(self):
+        intents = discord.Intents.default()
+        super().__init__(intents=intents)
+        self.tree = app_commands.CommandTree(self)
+        self.http_session = None
+
+    async def setup_hook(self):
+        timeout = aiohttp.ClientTimeout(total=10)
+        self.http_session = aiohttp.ClientSession(timeout=timeout)
+        self.polling_loop.start()
+
+    async def close(self):
+        self.polling_loop.cancel()
+        if self.http_session:
+            await self.http_session.close()
+        await super().close()
+
+    @tasks.loop(seconds=vatsim_stat_retrieve_period)
+    async def polling_loop(self):
+        try:
+            all_controllers, connected, disconnected = await get_controllers(self.http_session)
+            channel = self.get_channel(discord_channel_id)
+            if channel is None:
+                return
+            for a in connected:
+                await channel.send(embed=get_discord_embed('connect', connected[a], all_controllers))
+            for a in disconnected:
+                await channel.send(embed=get_discord_embed('disconnect', disconnected[a], all_controllers))
+                log_session(disconnected[a])
+        except Exception:
+            traceback.print_exc()
+
+    @polling_loop.before_loop
+    async def before_polling(self):
+        await self.wait_until_ready()
+
+bot = VATJPNBot()
+
+# ── Helper functions ───────────────────────────────────────────────
 
 def load_nicknames():
     try:
@@ -99,35 +162,30 @@ def get_old():
     except:
         return {}
 
-def get_new():
-    vatsim_info = requests.get(vatsim_stat_json_url).json()
-    controllers = vatsim_info["controllers"]
-    controllers_map = { controllers[i]["callsign"]: controllers[i] for i in range(0, len(controllers)) }
-
-    # print(vatsim_info["general"])
-
+async def get_new(http_session):
+    async with http_session.get(vatsim_stat_json_url) as resp:
+        vatsim_info = await resp.json()
+    controllers = vatsim_info.get("controllers", [])
+    controllers_map = {c["callsign"]: c for c in controllers}
     return controllers_map
 
-def get_controllers():
+async def get_controllers(http_session):
     old_stat = get_old()
-    new_stat = get_new()
+    new_stat = await get_new(http_session)
 
-    # save current
     with open(data_filename, "w") as a_file:
         json.dump(new_stat, a_file)
 
     connected_controllers = { k : new_stat[k] for k in set(new_stat) - set(old_stat) }
     disconnected_controllers = { k : old_stat[k] for k in set(old_stat) - set(new_stat) }
 
-    # filter
     connected_controllers = { d: connected_controllers[d] for d in connected_controllers if pattern.match(connected_controllers[d]['callsign']) is not None and connected_controllers[d]["rating"]>1 }
     disconnected_controllers = { d: disconnected_controllers[d] for d in disconnected_controllers if pattern.match(disconnected_controllers[d]['callsign']) is not None and disconnected_controllers[d]["rating"]>1 }
     all_controllers = { d: new_stat[d] for d in new_stat if pattern.match(new_stat[d]['callsign']) is not None and new_stat[d]["rating"]>1 }
 
-
     return all_controllers, connected_controllers, disconnected_controllers
 
-
+# ── Format helpers ─────────────────────────────────────────────────
 
 def format_duration(logon_time_str):
     try:
@@ -150,6 +208,13 @@ def format_online_entry(atc_info):
     duration_str = f" [{duration}]" if duration else ""
     return f"{callsign}{freq} - {name}{duration_str}"
 
+def format_duration_seconds(total_seconds):
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, _ = divmod(remainder, 60)
+    if hours > 0:
+        return f"{hours}時間{minutes:02d}分"
+    return f"{minutes}分"
+
 def get_discord_embed(connect_type, atc_info, current_list):
     online_entries = [format_online_entry(current_list[d]) for d in current_list]
     display_name = get_display_name(atc_info["cid"])
@@ -170,34 +235,15 @@ def get_discord_embed(connect_type, atc_info, current_list):
             embed.add_field(name='接続時間', value=format_duration(atc_info["logon_time"]))
         return embed
 
+# ── Slash commands ─────────────────────────────────────────────────
 
-async def run():
-    await client.wait_until_ready()
-
-    while not client.is_closed():
-        try:
-            all_controllers, connected_controllers, disconnected_controllers = get_controllers()
-
-            channel = client.get_channel(discord_channel_id)
-
-            for a in connected_controllers:
-                await channel.send(embed = get_discord_embed('connect', connected_controllers[a], all_controllers))
-            for a in disconnected_controllers:
-                await channel.send(embed = get_discord_embed('disconnect', disconnected_controllers[a], all_controllers))
-                log_session(disconnected_controllers[a])
-
-        except Exception as e:
-                traceback.print_exc()
-
-        finally:
-            await asyncio.sleep(vatsim_stat_retrieve_period)
-
-@tree.command(name="online", description="日本空域のオンライン管制官を表示")
+@bot.tree.command(name="online", description="日本空域のオンライン管制官を表示")
 async def online_command(interaction: discord.Interaction):
     await interaction.response.defer()
     try:
-        vatsim_info = requests.get(vatsim_stat_json_url).json()
-        controllers = vatsim_info["controllers"]
+        async with bot.http_session.get(vatsim_stat_json_url) as resp:
+            vatsim_info = await resp.json()
+        controllers = vatsim_info.get("controllers", [])
         jp_controllers = [c for c in controllers if pattern.match(c["callsign"]) and c["rating"] > 1]
 
         if not jp_controllers:
@@ -259,16 +305,9 @@ async def nickname_list(interaction: discord.Interaction):
     )
     await interaction.response.send_message(embed=embed)
 
-tree.add_command(nickname_group)
+bot.tree.add_command(nickname_group)
 
-def format_duration_seconds(total_seconds):
-    hours, remainder = divmod(total_seconds, 3600)
-    minutes, _ = divmod(remainder, 60)
-    if hours > 0:
-        return f"{hours}時間{minutes:02d}分"
-    return f"{minutes}分"
-
-@tree.command(name="stats", description="日本空域の管制統計を表示")
+@bot.tree.command(name="stats", description="日本空域の管制統計を表示")
 @app_commands.describe(
     days="集計日数（0=全期間、1=過去1日、7=過去7日 等）",
     position="ポジションフィルター（部分一致、例: RJTT）"
@@ -309,7 +348,6 @@ async def stats_command(interaction: discord.Interaction, days: int = 7, positio
         total_sessions = len(rows)
         total_duration = sum(r[2] for r in rows)
 
-        # ポジション別集計
         pos_stats = {}
         for _, callsign, duration in rows:
             if callsign not in pos_stats:
@@ -318,7 +356,6 @@ async def stats_command(interaction: discord.Interaction, days: int = 7, positio
             pos_stats[callsign]["count"] += 1
         pos_ranking = sorted(pos_stats.items(), key=lambda x: x[1]["duration"], reverse=True)[:10]
 
-        # 管制官別集計
         ctrl_stats = {}
         for cid, _, duration in rows:
             if cid not in ctrl_stats:
@@ -353,24 +390,25 @@ async def stats_command(interaction: discord.Interaction, days: int = 7, positio
         traceback.print_exc()
         await interaction.followup.send(f"エラーが発生しました: {e}")
 
-@client.event
-async def on_ready():
-    print(f'Logged in as {client.user}')
-    try:
-        # ギルドごとに同期
-        for guild in client.guilds:
-            tree.copy_global_to(guild=guild)
-            synced = await tree.sync(guild=guild)
-            print(f'Synced {len(synced)} slash command(s) to {guild.name}')
-        # 古いグローバルコマンドをクリア
-        tree.clear_commands(guild=None)
-        await tree.sync()
-        print('Cleared global commands')
-    except Exception as e:
-        print(f'Failed to sync slash commands: {e}')
-    # 二重起動防止：すでにループが走っていないか確認
-    if not hasattr(client, 'loop_started'):
-        client.loop.create_task(run())
-        client.loop_started = True
+# ── Events ─────────────────────────────────────────────────────────
 
-client.run(discord_bot_client_token)
+@bot.event
+async def on_ready():
+    print(f'Logged in as {bot.user}')
+    for attempt in range(3):
+        try:
+            for guild in bot.guilds:
+                bot.tree.copy_global_to(guild=guild)
+                synced = await bot.tree.sync(guild=guild)
+                print(f'Synced {len(synced)} slash command(s) to {guild.name}')
+            bot.tree.clear_commands(guild=None)
+            await bot.tree.sync()
+            print('Cleared global commands')
+            break
+        except Exception as e:
+            wait = 2 ** (attempt + 1)
+            print(f'Failed to sync slash commands (attempt {attempt + 1}/3): {e}')
+            if attempt < 2:
+                await asyncio.sleep(wait)
+
+bot.run(discord_bot_client_token)
