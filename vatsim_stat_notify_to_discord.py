@@ -378,31 +378,30 @@ async def traffic_command(interaction: discord.Interaction, icao: str):
             color=0x0099ff,
         )
 
-        def format_traffic_line(p, show_dest=True):
+        dep_lines = []
+        for p in sorted(departures, key=lambda x: x["callsign"]):
             fp = p["flight_plan"]
-            acft = fp.get("aircraft_short", fp.get("aircraft_faa", "?"))
+            alt = f"FL{int(p['altitude']) // 100}" if p.get("altitude", 0) > 10000 else f"{p.get('altitude', 0)}ft"
             gs = p.get("groundspeed", 0)
-            if gs > 50:
-                alt = p.get("altitude", 0)
-                alt_str = f"FL{int(alt) // 100}" if alt > 10000 else f"{alt}ft"
-                status = f"{alt_str} {gs}kt"
-            else:
-                status = "Gate" if show_dest else "Arrived"
-            target = fp.get("arrival", "?") if show_dest else fp.get("departure", "?")
-            arrow = f"→{target}" if show_dest else f"{target}→"
-            return f"`{p['callsign']}` {acft} {arrow}\n {status}"
+            status = f"{alt} / {gs}kt" if gs > 50 else "Gate/Taxi"
+            dep_lines.append(f"**{p['callsign']}** ({fp.get('aircraft_short', fp.get('aircraft_faa', '?'))})\n  → {fp.get('arrival', '?')} | {status}")
 
-        dep_lines = [format_traffic_line(p, show_dest=True) for p in sorted(departures, key=lambda x: x["callsign"])]
-        arr_lines = [format_traffic_line(p, show_dest=False) for p in sorted(arrivals, key=lambda x: x["callsign"])]
+        arr_lines = []
+        for p in sorted(arrivals, key=lambda x: x["callsign"]):
+            fp = p["flight_plan"]
+            alt = f"FL{int(p['altitude']) // 100}" if p.get("altitude", 0) > 10000 else f"{p.get('altitude', 0)}ft"
+            gs = p.get("groundspeed", 0)
+            status = f"{alt} / {gs}kt" if gs > 50 else "Arrived/Taxi"
+            arr_lines.append(f"**{p['callsign']}** ({fp.get('aircraft_short', fp.get('aircraft_faa', '?'))})\n  {fp.get('departure', '?')} → | {status}")
 
         embed.add_field(
-            name=f"DEP ({len(departures)})",
-            value='\n'.join(dep_lines[:20]) if dep_lines else "—",
+            name=f"Departures ({len(departures)})",
+            value='\n'.join(dep_lines[:15]) if dep_lines else "—",
             inline=True
         )
         embed.add_field(
-            name=f"ARR ({len(arrivals)})",
-            value='\n'.join(arr_lines[:20]) if arr_lines else "—",
+            name=f"Arrivals ({len(arrivals)})",
+            value='\n'.join(arr_lines[:15]) if arr_lines else "—",
             inline=True
         )
 
@@ -410,8 +409,9 @@ async def traffic_command(interaction: discord.Interaction, icao: str):
             pre_lines = []
             for p in sorted(prefiled, key=lambda x: x["callsign"]):
                 fp = p["flight_plan"]
-                acft = fp.get("aircraft_short", fp.get("aircraft_faa", "?"))
-                pre_lines.append(f"`{p['callsign']}` {acft} {fp.get('departure', '?')}→{fp.get('arrival', '?')}")
+                dep = fp.get("departure", "?")
+                arr = fp.get("arrival", "?")
+                pre_lines.append(f"**{p['callsign']}** ({fp.get('aircraft_short', fp.get('aircraft_faa', '?'))}) {dep} → {arr}")
             embed.add_field(name=f"Prefiled ({len(prefiled)})", value='\n'.join(pre_lines[:10]), inline=False)
 
         total = len(departures) + len(arrivals) + len(prefiled)
