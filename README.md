@@ -34,7 +34,7 @@ VATSIM 日本空域の ATC 管制官のオンライン/オフライン状況を 
 - **Supervisor 一覧** - VATSIM ネットワーク全体のオンライン SUP/ADM を表示
 - **空港トラフィック** - ICAO コードで空港を指定し、出発・到着・プリファイル済みフライトを一覧表示
 - **NOTAM 表示** - FAA NOTAM API から空港の NOTAM を取得・表示。`japan` で主要6空港の一括サマリーも可能
-- **個人管制統計** - Discord ID と VATSIM CID を紐付けて個人の管制統計を表示。VATSIM API からレーティング情報も取得
+- **個人管制統計** - Discord ID と VATSIM CID を紐付けて個人の管制統計を表示。VATSIM API から総管制時間・レーティング情報も取得
 
 ## セットアップ / Setup
 
