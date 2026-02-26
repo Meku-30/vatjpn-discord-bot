@@ -10,3 +10,8 @@ discord_channel_id=YOUR_CHANNEL_ID
 data_filename=data.json
 nickname_filename=nicknames.json
 stats_db_filename=stats.db
+
+# NOTAM feature requires FAA API credentials in .env:
+#   FAA_CLIENT_ID=your_id
+#   FAA_CLIENT_SECRET=your_secret
+# Register at https://api.faa.gov/s/
