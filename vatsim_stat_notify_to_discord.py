@@ -65,6 +65,11 @@ def init_db():
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_logoff_time ON sessions(logoff_time)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_callsign ON sessions(callsign)")
+    c.execute("""CREATE TABLE IF NOT EXISTS user_links (
+        discord_id TEXT PRIMARY KEY,
+        cid INTEGER NOT NULL
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_cid ON sessions(cid)")
     conn.commit()
     conn.close()
 
