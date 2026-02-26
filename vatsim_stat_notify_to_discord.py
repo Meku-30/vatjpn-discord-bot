@@ -83,79 +83,64 @@ def log_session(atc_info):
             duration_seconds = int((logoff_time - logon_time).total_seconds())
         except (ValueError, TypeError):
             pass
-    conn = sqlite3.connect(stats_db_filename)
-    c = conn.cursor()
-    c.execute(
-        "INSERT INTO sessions (cid, callsign, rating, logon_time, logoff_time, duration_seconds) VALUES (?, ?, ?, ?, ?, ?)",
-        (atc_info["cid"], atc_info["callsign"], atc_info["rating"],
-         logon_time_str, logoff_time.isoformat(), duration_seconds)
-    )
-    conn.commit()
-    conn.close()
+    with sqlite3.connect(stats_db_filename) as conn:
+        conn.execute(
+            "INSERT INTO sessions (cid, callsign, rating, logon_time, logoff_time, duration_seconds) VALUES (?, ?, ?, ?, ?, ?)",
+            (atc_info["cid"], atc_info["callsign"], atc_info["rating"],
+             logon_time_str, logoff_time.isoformat(), duration_seconds)
+        )
 
 def link_user(discord_id, cid):
-    conn = sqlite3.connect(stats_db_filename)
-    c = conn.cursor()
-    c.execute("INSERT OR REPLACE INTO user_links (discord_id, cid) VALUES (?, ?)", (str(discord_id), cid))
-    conn.commit()
-    conn.close()
+    with sqlite3.connect(stats_db_filename) as conn:
+        conn.execute("INSERT OR REPLACE INTO user_links (discord_id, cid) VALUES (?, ?)", (str(discord_id), cid))
 
 def unlink_user(discord_id):
-    conn = sqlite3.connect(stats_db_filename)
-    c = conn.cursor()
-    c.execute("DELETE FROM user_links WHERE discord_id = ?", (str(discord_id),))
-    affected = c.rowcount
-    conn.commit()
-    conn.close()
-    return affected > 0
+    with sqlite3.connect(stats_db_filename) as conn:
+        cursor = conn.execute("DELETE FROM user_links WHERE discord_id = ?", (str(discord_id),))
+        return cursor.rowcount > 0
 
 def get_linked_cid(discord_id):
-    conn = sqlite3.connect(stats_db_filename)
-    c = conn.cursor()
-    c.execute("SELECT cid FROM user_links WHERE discord_id = ?", (str(discord_id),))
-    row = c.fetchone()
-    conn.close()
-    return row[0] if row else None
+    with sqlite3.connect(stats_db_filename) as conn:
+        row = conn.execute("SELECT cid FROM user_links WHERE discord_id = ?", (str(discord_id),)).fetchone()
+        return row[0] if row else None
 
 def get_controller_stats(cid):
     """Get statistics for a given CID from local DB. Returns dict or None."""
-    conn = sqlite3.connect(stats_db_filename)
-    c = conn.cursor()
+    with sqlite3.connect(stats_db_filename) as conn:
+        c = conn.cursor()
 
-    c.execute("SELECT COUNT(*), SUM(duration_seconds) FROM sessions WHERE cid = ?", (cid,))
-    row = c.fetchone()
-    total_sessions = row[0] or 0
-    total_duration = row[1] or 0
+        c.execute("SELECT COUNT(*), SUM(duration_seconds) FROM sessions WHERE cid = ?", (cid,))
+        row = c.fetchone()
+        total_sessions = row[0] or 0
+        total_duration = row[1] or 0
 
-    if total_sessions == 0:
-        conn.close()
-        return None
+        if total_sessions == 0:
+            return None
 
-    # Position breakdown (top 5)
-    c.execute("""SELECT callsign, SUM(duration_seconds) as total, COUNT(*) as cnt
-                 FROM sessions WHERE cid = ?
-                 GROUP BY callsign ORDER BY total DESC LIMIT 5""", (cid,))
-    positions = [{"callsign": r[0], "duration": r[1], "count": r[2]} for r in c.fetchall()]
+        # Position breakdown (top 5)
+        c.execute("""SELECT callsign, SUM(duration_seconds) as total, COUNT(*) as cnt
+                     FROM sessions WHERE cid = ?
+                     GROUP BY callsign ORDER BY total DESC LIMIT 5""", (cid,))
+        positions = [{"callsign": r[0], "duration": r[1], "count": r[2]} for r in c.fetchall()]
 
-    # Longest session
-    c.execute("""SELECT callsign, duration_seconds, logon_time FROM sessions
-                 WHERE cid = ? ORDER BY duration_seconds DESC LIMIT 1""", (cid,))
-    longest_row = c.fetchone()
-    longest = {"callsign": longest_row[0], "duration": longest_row[1]} if longest_row else None
+        # Longest session
+        c.execute("""SELECT callsign, duration_seconds, logon_time FROM sessions
+                     WHERE cid = ? ORDER BY duration_seconds DESC LIMIT 1""", (cid,))
+        longest_row = c.fetchone()
+        longest = {"callsign": longest_row[0], "duration": longest_row[1]} if longest_row else None
 
-    # Last activity
-    c.execute("SELECT logoff_time FROM sessions WHERE cid = ? ORDER BY logoff_time DESC LIMIT 1", (cid,))
-    last_row = c.fetchone()
-    last_logoff = last_row[0] if last_row else None
+        # Last activity
+        c.execute("SELECT logoff_time FROM sessions WHERE cid = ? ORDER BY logoff_time DESC LIMIT 1", (cid,))
+        last_row = c.fetchone()
+        last_logoff = last_row[0] if last_row else None
 
-    conn.close()
-    return {
-        "total_sessions": total_sessions,
-        "total_duration": total_duration,
-        "positions": positions,
-        "longest": longest,
-        "last_logoff": last_logoff,
-    }
+        return {
+            "total_sessions": total_sessions,
+            "total_duration": total_duration,
+            "positions": positions,
+            "longest": longest,
+            "last_logoff": last_logoff,
+        }
 
 async def fetch_vatsim_member(http_session, cid):
     """Fetch member info and stats from VATSIM API. Returns dict or None."""
@@ -179,8 +164,7 @@ def build_stats_embed(cid, stats, vatsim_info):
     reg_date_str = ""
     if vatsim_info:
         r = vatsim_info.get("rating", 0)
-        if 0 <= r < len(rating_list):
-            rating_str = rating_list[r]
+        rating_str = get_rating_str(r)
         reg = vatsim_info.get("reg_date", "")
         if reg:
             reg_date_str = reg[:10]
@@ -228,6 +212,11 @@ init_db()
 # ── Constants ──────────────────────────────────────────────────────
 
 rating_list = ["Unknown", "OBS", "S1", "S2", "S3", "C1", "C2", "C3", "I1", "I2", "I3", "SUP", "ADM"]
+
+def get_rating_str(rating):
+    if 0 <= rating < len(rating_list):
+        return rating_list[rating]
+    return f"Unknown({rating})"
 
 # ── Bot class ──────────────────────────────────────────────────────
 
@@ -294,7 +283,7 @@ def get_old():
     try:
         with open(data_filename, "r") as old_file:
             return json.loads(old_file.read())
-    except:
+    except Exception:
         return {}
 
 async def get_new(http_session):
@@ -356,14 +345,14 @@ def get_discord_embed(connect_type, atc_info, current_list):
 
     if connect_type == "connect":
         embed = discord.Embed(title=atc_info['callsign'] + ' - ' + connect_type, color=0x00ff00, description='< online list >\n' + '\n'.join(online_entries))
-        embed.add_field(name='Rating', value=rating_list[atc_info["rating"]])
+        embed.add_field(name='Rating', value=get_rating_str(atc_info["rating"]))
         embed.add_field(name='CID', value=display_name)
         embed.add_field(name='Server', value=atc_info["server"])
         return embed
 
     if connect_type == "disconnect":
         embed = discord.Embed(title=atc_info['callsign'] + ' - ' + connect_type, color=0xff0000, description='< online list >\n' + '\n'.join(online_entries))
-        embed.add_field(name='Rating', value=rating_list[atc_info["rating"]])
+        embed.add_field(name='Rating', value=get_rating_str(atc_info["rating"]))
         embed.add_field(name='CID', value=display_name)
         embed.add_field(name='Server', value=atc_info["server"])
         if atc_info.get("logon_time"):
@@ -391,12 +380,15 @@ async def online_command(interaction: discord.Interaction):
             freq = f" ({c['frequency']})" if c["frequency"] != "199.998" else ""
             name = get_display_name(c["cid"])
             duration = format_duration(c.get("logon_time", ""))
-            lines.append(f"**{c['callsign']}**{freq}\n  {rating_list[c['rating']]} | {name} | {duration}")
+            lines.append(f"**{c['callsign']}**{freq}\n  {get_rating_str(c['rating'])} | {name} | {duration}")
 
+        description = '\n'.join(lines)
+        if len(description) > 4096:
+            description = description[:4093] + "..."
         embed = discord.Embed(
             title="VATJPN Online Controllers",
             color=0x0099ff,
-            description='\n'.join(lines)
+            description=description
         )
         embed.set_footer(text=f"Total: {len(jp_controllers)} controller(s)")
         await interaction.followup.send(embed=embed)
@@ -460,7 +452,7 @@ async def sup_command(interaction: discord.Interaction):
         for c in sups:
             freq = f" ({c['frequency']})" if c["frequency"] != "199.998" else ""
             duration = format_duration(c.get("logon_time", ""))
-            lines.append(f"**{c['callsign']}**{freq}\n  {rating_list[c['rating']]} | {c['name']} | {duration}")
+            lines.append(f"**{c['callsign']}**{freq}\n  {get_rating_str(c['rating'])} | {c['name']} | {duration}")
 
         embed = discord.Embed(
             title="Online Supervisors",
@@ -513,30 +505,41 @@ async def traffic_command(interaction: discord.Interaction, icao: str):
             color=0x0099ff,
         )
 
+        def format_altitude(p):
+            alt = p.get("altitude", 0)
+            try:
+                alt = int(alt)
+            except (ValueError, TypeError):
+                return "?ft"
+            return f"FL{alt // 100}" if alt > 10000 else f"{alt}ft"
+
+        def truncate_field(text, limit=1024):
+            if len(text) <= limit:
+                return text
+            return text[:limit - 3] + "..."
+
         dep_lines = []
         for p in sorted(departures, key=lambda x: x["callsign"]):
             fp = p["flight_plan"]
-            alt = f"FL{int(p['altitude']) // 100}" if p.get("altitude", 0) > 10000 else f"{p.get('altitude', 0)}ft"
             gs = p.get("groundspeed", 0)
-            status = f"{alt} / {gs}kt" if gs > 50 else "Gate/Taxi"
+            status = f"{format_altitude(p)} / {gs}kt" if gs > 50 else "Gate/Taxi"
             dep_lines.append(f"**{p['callsign']}** ({fp.get('aircraft_short', fp.get('aircraft_faa', '?'))})\n  → {fp.get('arrival', '?')} | {status}")
 
         arr_lines = []
         for p in sorted(arrivals, key=lambda x: x["callsign"]):
             fp = p["flight_plan"]
-            alt = f"FL{int(p['altitude']) // 100}" if p.get("altitude", 0) > 10000 else f"{p.get('altitude', 0)}ft"
             gs = p.get("groundspeed", 0)
-            status = f"{alt} / {gs}kt" if gs > 50 else "Arrived/Taxi"
+            status = f"{format_altitude(p)} / {gs}kt" if gs > 50 else "Arrived/Taxi"
             arr_lines.append(f"**{p['callsign']}** ({fp.get('aircraft_short', fp.get('aircraft_faa', '?'))})\n  {fp.get('departure', '?')} → | {status}")
 
         embed.add_field(
             name=f"Departures ({len(departures)})",
-            value='\n'.join(dep_lines[:15]) if dep_lines else "—",
+            value=truncate_field('\n'.join(dep_lines[:15])) if dep_lines else "—",
             inline=True
         )
         embed.add_field(
             name=f"Arrivals ({len(arrivals)})",
-            value='\n'.join(arr_lines[:15]) if arr_lines else "—",
+            value=truncate_field('\n'.join(arr_lines[:15])) if arr_lines else "—",
             inline=True
         )
 
@@ -547,7 +550,7 @@ async def traffic_command(interaction: discord.Interaction, icao: str):
                 dep = fp.get("departure", "?")
                 arr = fp.get("arrival", "?")
                 pre_lines.append(f"**{p['callsign']}** ({fp.get('aircraft_short', fp.get('aircraft_faa', '?'))}) {dep} → {arr}")
-            embed.add_field(name=f"Prefiled ({len(prefiled)})", value='\n'.join(pre_lines[:10]), inline=False)
+            embed.add_field(name=f"Prefiled ({len(prefiled)})", value=truncate_field('\n'.join(pre_lines[:10])), inline=False)
 
         total = len(departures) + len(arrivals) + len(prefiled)
         embed.set_footer(text=f"Total: {total} flight(s)")
@@ -574,21 +577,16 @@ async def stats_command(interaction: discord.Interaction, days: int = 7, positio
         if position:
             period_label += f" | {position}"
 
-        conn = sqlite3.connect(stats_db_filename)
-        c = conn.cursor()
-
-        query = "SELECT cid, callsign, duration_seconds FROM sessions WHERE 1=1"
-        params = []
-        if start:
-            query += " AND logoff_time >= ?"
-            params.append(start.isoformat())
-        if position:
-            query += " AND callsign LIKE ?"
-            params.append(f"%{position}%")
-
-        c.execute(query, params)
-        rows = c.fetchall()
-        conn.close()
+        with sqlite3.connect(stats_db_filename) as conn:
+            query = "SELECT cid, callsign, duration_seconds FROM sessions WHERE 1=1"
+            params = []
+            if start:
+                query += " AND logoff_time >= ?"
+                params.append(start.isoformat())
+            if position:
+                query += " AND callsign LIKE ?"
+                params.append(f"%{position}%")
+            rows = conn.execute(query, params).fetchall()
 
         if not rows:
             await interaction.followup.send(f"📊 **VATJPN 管制統計 ({period_label})**\n\nデータがありません。")
@@ -649,6 +647,9 @@ mystats_group = app_commands.Group(name="mystats", description="管制官個人�
 @mystats_group.command(name="link", description="Discord IDとVATSIM CIDを紐付け")
 @app_commands.describe(cid="VATSIM CID")
 async def mystats_link(interaction: discord.Interaction, cid: int):
+    if cid < 800000 or cid > 9999999:
+        await interaction.response.send_message("無効なCIDです。VATSIM CIDは6〜7桁の数字です。")
+        return
     link_user(interaction.user.id, cid)
     await interaction.response.send_message(f"CID **{cid}** と紐付けました。`/mystats show` で統計を確認できます。")
 
