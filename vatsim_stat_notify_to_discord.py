@@ -172,12 +172,16 @@ def get_controller_stats(cid):
     }
 
 async def fetch_vatsim_member(http_session, cid):
-    """Fetch member info from VATSIM API. Returns dict or None."""
+    """Fetch member info and stats from VATSIM API. Returns dict or None."""
     try:
         async with http_session.get(f"https://api.vatsim.net/v2/members/{cid}") as resp:
             if resp.status != 200:
                 return None
-            return await resp.json()
+            info = await resp.json()
+        async with http_session.get(f"https://api.vatsim.net/v2/members/{cid}/stats") as resp:
+            if resp.status == 200:
+                info["stats"] = await resp.json()
+        return info
     except Exception:
         return None
 
@@ -195,12 +199,21 @@ def build_stats_embed(cid, stats, vatsim_info):
         if reg:
             reg_date_str = reg[:10]
 
+    vatsim_atc_hours = None
+    if vatsim_info and "stats" in vatsim_info:
+        vatsim_atc_hours = vatsim_info["stats"].get("atc")
+
     desc_lines = []
     if rating_str:
         desc_lines.append(f"Rating: **{rating_str}**")
     if reg_date_str:
         desc_lines.append(f"登録日: {reg_date_str}")
+    if vatsim_atc_hours is not None:
+        h = int(vatsim_atc_hours)
+        m = int((vatsim_atc_hours - h) * 60)
+        desc_lines.append(f"VATSIM総管制時間: **{h}時間{m:02d}分**")
     desc_lines.append("")
+    desc_lines.append(f"__日本空域 (Bot記録)__")
     desc_lines.append(f"総セッション: **{stats['total_sessions']}**回")
     desc_lines.append(f"総管制時間: **{format_duration_seconds(stats['total_duration'])}**")
     if stats["longest"]:
