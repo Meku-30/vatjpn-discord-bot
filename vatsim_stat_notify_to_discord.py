@@ -48,6 +48,20 @@ data_filename = config["DATAFILE_CONFIG"]["data_filename"]
 nickname_filename = config.get("DATAFILE_CONFIG", "nickname_filename", fallback="nicknames.json")
 stats_db_filename = config.get("DATAFILE_CONFIG", "stats_db_filename", fallback="stats.db")
 
+# ── FAA NOTAM API (optional) ──────────────────────────────────────
+faa_client_id = os.environ.get("FAA_CLIENT_ID")
+faa_client_secret = os.environ.get("FAA_CLIENT_SECRET")
+FAA_NOTAM_API_URL = "https://external-api.faa.gov/notamapi/v1/notams"
+
+JAPAN_MAJOR_AIRPORTS = {
+    "RJTT": "羽田",
+    "RJAA": "成田",
+    "RJBB": "関西",
+    "RJOO": "伊丹",
+    "RJFF": "福岡",
+    "RJCC": "新千歳",
+}
+
 # ── SQLite ─────────────────────────────────────────────────────────
 
 def init_db():
