@@ -15,8 +15,6 @@ VATSIM 日本空域の ATC 管制官のオンライン/オフライン状況を 
 | `/sup` | オンラインの Supervisor (SUP/ADM) 一覧を表示 |
 | `/traffic <icao>` | 指定空港の発着予定トラフィック一覧（出発・到着・プリファイル） |
 | `/stats [days:<日数>] [position:<ポジション>]` | 管制統計を表示（日数: 0=全期間、デフォルト7日、ポジション: 部分一致フィルター） |
-| `/notam <icao>` | 空港の NOTAM を表示（FAA NOTAM API） |
-| `/notam japan` | 日本主要6空港の NOTAM 件数サマリーを表示 |
 | `/mystats link <cid>` | Discord ID と VATSIM CID を紐付け |
 | `/mystats unlink` | CID の紐付けを解除 |
 | `/mystats show` | 自分の管制統計を表示（要 link） |
@@ -33,7 +31,6 @@ VATSIM 日本空域の ATC 管制官のオンライン/オフライン状況を 
 - **管制統計** - ログアウト時にセッションを SQLite に記録し、`/stats` で期間別・ポジション別の統計を表示
 - **Supervisor 一覧** - VATSIM ネットワーク全体のオンライン SUP/ADM を表示
 - **空港トラフィック** - ICAO コードで空港を指定し、出発・到着・プリファイル済みフライトを一覧表示
-- **NOTAM 表示** - FAA NOTAM API から空港の NOTAM を取得・表示。`japan` で主要6空港の一括サマリーも可能
 - **個人管制統計** - Discord ID と VATSIM CID を紐付けて個人の管制統計を表示。VATSIM API から総管制時間・レーティング情報も取得
 
 ## セットアップ / Setup
@@ -51,15 +48,6 @@ export DISCORD_BOT_TOKEN="your-bot-token-here"
 `.env` ファイルに記載する（docker-compose.yml と同じディレクトリに配置）:
 ```
 DISCORD_BOT_TOKEN=your-bot-token-here
-```
-
-### 1b. FAA NOTAM API キーの設定（任意）
-
-`/notam` コマンドを使用する場合は [FAA API Portal](https://api.faa.gov/s/) で登録し、キーを取得する。
-
-```
-FAA_CLIENT_ID=your-client-id
-FAA_CLIENT_SECRET=your-client-secret
 ```
 
 ### 2. settings.ini の設定
