@@ -107,6 +107,30 @@ def log_session(atc_info):
     conn.commit()
     conn.close()
 
+def link_user(discord_id, cid):
+    conn = sqlite3.connect(stats_db_filename)
+    c = conn.cursor()
+    c.execute("INSERT OR REPLACE INTO user_links (discord_id, cid) VALUES (?, ?)", (str(discord_id), cid))
+    conn.commit()
+    conn.close()
+
+def unlink_user(discord_id):
+    conn = sqlite3.connect(stats_db_filename)
+    c = conn.cursor()
+    c.execute("DELETE FROM user_links WHERE discord_id = ?", (str(discord_id),))
+    affected = c.rowcount
+    conn.commit()
+    conn.close()
+    return affected > 0
+
+def get_linked_cid(discord_id):
+    conn = sqlite3.connect(stats_db_filename)
+    c = conn.cursor()
+    c.execute("SELECT cid FROM user_links WHERE discord_id = ?", (str(discord_id),))
+    row = c.fetchone()
+    conn.close()
+    return row[0] if row else None
+
 init_db()
 
 # ── Constants ──────────────────────────────────────────────────────
@@ -660,6 +684,25 @@ async def notam_command(interaction: discord.Interaction, icao: str):
     except Exception as e:
         traceback.print_exc()
         await interaction.followup.send(f"エラーが発生しました: {e}")
+
+# ── MyStats commands ──────────────────────────────────────────────
+
+mystats_group = app_commands.Group(name="mystats", description="管制官個人統計")
+
+@mystats_group.command(name="link", description="Discord IDとVATSIM CIDを紐付け")
+@app_commands.describe(cid="VATSIM CID")
+async def mystats_link(interaction: discord.Interaction, cid: int):
+    link_user(interaction.user.id, cid)
+    await interaction.response.send_message(f"CID **{cid}** と紐付けました。`/mystats show` で統計を確認できます。")
+
+@mystats_group.command(name="unlink", description="CIDの紐付けを解除")
+async def mystats_unlink(interaction: discord.Interaction):
+    if unlink_user(interaction.user.id):
+        await interaction.response.send_message("CIDの紐付けを解除しました。")
+    else:
+        await interaction.response.send_message("紐付けされていません。")
+
+bot.tree.add_command(mystats_group)
 
 # ── Events ─────────────────────────────────────────────────────────
 
