@@ -131,6 +131,99 @@ def get_linked_cid(discord_id):
     conn.close()
     return row[0] if row else None
 
+def get_controller_stats(cid):
+    """Get statistics for a given CID from local DB. Returns dict or None."""
+    conn = sqlite3.connect(stats_db_filename)
+    c = conn.cursor()
+
+    c.execute("SELECT COUNT(*), SUM(duration_seconds) FROM sessions WHERE cid = ?", (cid,))
+    row = c.fetchone()
+    total_sessions = row[0] or 0
+    total_duration = row[1] or 0
+
+    if total_sessions == 0:
+        conn.close()
+        return None
+
+    # Position breakdown (top 5)
+    c.execute("""SELECT callsign, SUM(duration_seconds) as total, COUNT(*) as cnt
+                 FROM sessions WHERE cid = ?
+                 GROUP BY callsign ORDER BY total DESC LIMIT 5""", (cid,))
+    positions = [{"callsign": r[0], "duration": r[1], "count": r[2]} for r in c.fetchall()]
+
+    # Longest session
+    c.execute("""SELECT callsign, duration_seconds, logon_time FROM sessions
+                 WHERE cid = ? ORDER BY duration_seconds DESC LIMIT 1""", (cid,))
+    longest_row = c.fetchone()
+    longest = {"callsign": longest_row[0], "duration": longest_row[1]} if longest_row else None
+
+    # Last activity
+    c.execute("SELECT logoff_time FROM sessions WHERE cid = ? ORDER BY logoff_time DESC LIMIT 1", (cid,))
+    last_row = c.fetchone()
+    last_logoff = last_row[0] if last_row else None
+
+    conn.close()
+    return {
+        "total_sessions": total_sessions,
+        "total_duration": total_duration,
+        "positions": positions,
+        "longest": longest,
+        "last_logoff": last_logoff,
+    }
+
+async def fetch_vatsim_member(http_session, cid):
+    """Fetch member info from VATSIM API. Returns dict or None."""
+    try:
+        async with http_session.get(f"https://api.vatsim.net/v2/members/{cid}") as resp:
+            if resp.status != 200:
+                return None
+            return await resp.json()
+    except Exception:
+        return None
+
+def build_stats_embed(cid, stats, vatsim_info):
+    """Build Discord embed for controller stats."""
+    name = get_display_name(cid)
+
+    rating_str = ""
+    reg_date_str = ""
+    if vatsim_info:
+        r = vatsim_info.get("rating", 0)
+        if 0 <= r < len(rating_list):
+            rating_str = rating_list[r]
+        reg = vatsim_info.get("reg_date", "")
+        if reg:
+            reg_date_str = reg[:10]
+
+    desc_lines = []
+    if rating_str:
+        desc_lines.append(f"Rating: **{rating_str}**")
+    if reg_date_str:
+        desc_lines.append(f"登録日: {reg_date_str}")
+    desc_lines.append("")
+    desc_lines.append(f"総セッション: **{stats['total_sessions']}**回")
+    desc_lines.append(f"総管制時間: **{format_duration_seconds(stats['total_duration'])}**")
+    if stats["longest"]:
+        desc_lines.append(f"最長セッション: **{format_duration_seconds(stats['longest']['duration'])}** ({stats['longest']['callsign']})")
+    if stats["last_logoff"]:
+        desc_lines.append(f"最終ログオフ: {stats['last_logoff'][:16]}Z")
+
+    embed = discord.Embed(
+        title=f"Controller Stats - {name}",
+        color=0x00bfff,
+        description="\n".join(desc_lines),
+    )
+
+    if stats["positions"]:
+        pos_lines = []
+        rank_medal = ["🥇", "🥈", "🥉"]
+        for i, p in enumerate(stats["positions"]):
+            prefix = rank_medal[i] if i < 3 else f"`{i+1}.`"
+            pos_lines.append(f"{prefix} `{p['callsign']}` - {format_duration_seconds(p['duration'])} ({p['count']}回)")
+        embed.add_field(name="ポジション別 TOP5", value="\n".join(pos_lines), inline=False)
+
+    return embed
+
 init_db()
 
 # ── Constants ──────────────────────────────────────────────────────
@@ -701,6 +794,44 @@ async def mystats_unlink(interaction: discord.Interaction):
         await interaction.response.send_message("CIDの紐付けを解除しました。")
     else:
         await interaction.response.send_message("紐付けされていません。")
+
+@mystats_group.command(name="show", description="自分の管制統計を表示")
+async def mystats_show(interaction: discord.Interaction):
+    await interaction.response.defer()
+    try:
+        cid = get_linked_cid(interaction.user.id)
+        if cid is None:
+            await interaction.followup.send("CIDが紐付けられていません。`/mystats link <CID>` で紐付けてください。")
+            return
+
+        stats = get_controller_stats(cid)
+        if stats is None:
+            await interaction.followup.send(f"CID **{cid}** の管制セッションデータがありません。")
+            return
+
+        vatsim_info = await fetch_vatsim_member(bot.http_session, cid)
+        embed = build_stats_embed(cid, stats, vatsim_info)
+        await interaction.followup.send(embed=embed)
+    except Exception as e:
+        traceback.print_exc()
+        await interaction.followup.send(f"エラーが発生しました: {e}")
+
+@mystats_group.command(name="user", description="指定CIDの管制統計を表示")
+@app_commands.describe(cid="VATSIM CID")
+async def mystats_user(interaction: discord.Interaction, cid: int):
+    await interaction.response.defer()
+    try:
+        stats = get_controller_stats(cid)
+        if stats is None:
+            await interaction.followup.send(f"CID **{cid}** の管制セッションデータがありません。")
+            return
+
+        vatsim_info = await fetch_vatsim_member(bot.http_session, cid)
+        embed = build_stats_embed(cid, stats, vatsim_info)
+        await interaction.followup.send(embed=embed)
+    except Exception as e:
+        traceback.print_exc()
+        await interaction.followup.send(f"エラーが発生しました: {e}")
 
 bot.tree.add_command(mystats_group)
 
