@@ -583,6 +583,37 @@ async def fetch_notams(http_session, icao, page_size=10):
         })
     return notams, total_count, None
 
+async def _notam_japan_summary(interaction):
+    """Fetch NOTAM counts for all major Japanese airports and display summary."""
+    if not faa_client_id or not faa_client_secret:
+        await interaction.followup.send("NOTAM機能を使用するにはFAA APIキーの設定が必要です。\n`.env` に `FAA_CLIENT_ID` と `FAA_CLIENT_SECRET` を設定してください。")
+        return
+
+    lines = []
+    tasks_list = []
+    for icao in JAPAN_MAJOR_AIRPORTS:
+        tasks_list.append(fetch_notams(bot.http_session, icao, page_size=1))
+
+    results = await asyncio.gather(*tasks_list, return_exceptions=True)
+
+    for (icao, name), result in zip(JAPAN_MAJOR_AIRPORTS.items(), results):
+        if isinstance(result, Exception):
+            lines.append(f"**{icao}** ({name}): エラー")
+        else:
+            _, total_count, error = result
+            if error:
+                lines.append(f"**{icao}** ({name}): {error}")
+            else:
+                lines.append(f"**{icao}** ({name}): {total_count}件")
+
+    embed = discord.Embed(
+        title="Japan NOTAM Summary",
+        color=0xff9900,
+        description="\n".join(lines),
+    )
+    embed.set_footer(text="Data source: FAA NOTAM API")
+    await interaction.followup.send(embed=embed)
+
 @bot.tree.command(name="notam", description="空港のNOTAMを表示")
 @app_commands.describe(icao="空港のICAOコード（例: RJTT）または 'japan' で主要空港一括表示")
 async def notam_command(interaction: discord.Interaction, icao: str):
