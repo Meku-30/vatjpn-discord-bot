@@ -526,6 +526,110 @@ async def stats_command(interaction: discord.Interaction, days: int = 7, positio
         traceback.print_exc()
         await interaction.followup.send(f"エラーが発生しました: {e}")
 
+# ── NOTAM helper ──────────────────────────────────────────────────
+
+async def fetch_notams(http_session, icao, page_size=10):
+    """Fetch NOTAMs from FAA API for a given ICAO code. Returns (notams_list, total_count, error_msg)."""
+    if not faa_client_id or not faa_client_secret:
+        return [], 0, "NOTAM機能を使用するにはFAA APIキーの設定が必要です。\n`.env` に `FAA_CLIENT_ID` と `FAA_CLIENT_SECRET` を設定してください。"
+    headers = {
+        "client_id": faa_client_id,
+        "client_secret": faa_client_secret,
+        "Accept": "application/json",
+    }
+    params = {
+        "icaoLocation": icao,
+        "responseFormat": "geoJson",
+        "pageSize": str(page_size),
+        "sortBy": "effectiveStartDate",
+        "sortOrder": "Desc",
+    }
+    try:
+        async with http_session.get(FAA_NOTAM_API_URL, headers=headers, params=params) as resp:
+            if resp.status == 401 or resp.status == 403:
+                return [], 0, "NOTAM APIの認証に失敗しました。APIキーを確認してください。"
+            if resp.status != 200:
+                return [], 0, f"NOTAM APIエラー (HTTP {resp.status})"
+            data = await resp.json()
+    except asyncio.TimeoutError:
+        return [], 0, "NOTAM情報の取得がタイムアウトしました。"
+    except Exception:
+        return [], 0, "NOTAM情報の取得に失敗しました。"
+
+    # Parse GeoJSON response
+    features = []
+    total_count = 0
+    if isinstance(data, dict):
+        features = data.get("features", [])
+        total_count = data.get("totalCount", len(features))
+    elif isinstance(data, list):
+        features = data
+        total_count = len(features)
+
+    notams = []
+    for f in features:
+        props = f.get("properties", f) if isinstance(f, dict) else {}
+        notams.append({
+            "id": props.get("coreNOTAMData", {}).get("notam", {}).get("id", "")
+                   if "coreNOTAMData" in props else props.get("id", ""),
+            "text": props.get("coreNOTAMData", {}).get("notam", {}).get("text", "")
+                     if "coreNOTAMData" in props else props.get("text", ""),
+            "classification": props.get("coreNOTAMData", {}).get("notam", {}).get("classification", "")
+                              if "coreNOTAMData" in props else props.get("classification", ""),
+            "effectiveStart": props.get("coreNOTAMData", {}).get("notam", {}).get("effectiveStart", "")
+                              if "coreNOTAMData" in props else props.get("effectiveStart", ""),
+            "effectiveEnd": props.get("coreNOTAMData", {}).get("notam", {}).get("effectiveEnd", "")
+                            if "coreNOTAMData" in props else props.get("effectiveEnd", ""),
+        })
+    return notams, total_count, None
+
+@bot.tree.command(name="notam", description="空港のNOTAMを表示")
+@app_commands.describe(icao="空港のICAOコード（例: RJTT）または 'japan' で主要空港一括表示")
+async def notam_command(interaction: discord.Interaction, icao: str):
+    await interaction.response.defer()
+    try:
+        icao_input = icao.strip().upper()
+
+        # japan 一括表示は Task 4 で実装
+        if icao_input == "JAPAN":
+            await _notam_japan_summary(interaction)
+            return
+
+        notams, total_count, error = await fetch_notams(bot.http_session, icao_input)
+        if error:
+            await interaction.followup.send(error)
+            return
+
+        if not notams:
+            await interaction.followup.send(f"**{icao_input}** に現在アクティブなNOTAMはありません。")
+            return
+
+        lines = []
+        for n in notams[:10]:
+            notam_id = n["id"] or "N/A"
+            text = n["text"] or ""
+            summary = text.replace("\n", " ")[:200]
+            if len(text) > 200:
+                summary += "..."
+            start = n["effectiveStart"][:16] if n["effectiveStart"] else "?"
+            end = n["effectiveEnd"][:16] if n["effectiveEnd"] else "PERM"
+            lines.append(f"**[{notam_id}]**\n{summary}\n`{start}` ~ `{end}`")
+
+        description = "\n\n".join(lines)
+        if len(description) > 4000:
+            description = description[:4000] + "\n..."
+
+        embed = discord.Embed(
+            title=f"{icao_input} NOTAM ({total_count}件)",
+            color=0xff9900,
+            description=description,
+        )
+        embed.set_footer(text="Data source: FAA NOTAM API")
+        await interaction.followup.send(embed=embed)
+    except Exception as e:
+        traceback.print_exc()
+        await interaction.followup.send(f"エラーが発生しました: {e}")
+
 # ── Events ─────────────────────────────────────────────────────────
 
 @bot.event
