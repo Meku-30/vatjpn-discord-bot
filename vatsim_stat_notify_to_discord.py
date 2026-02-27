@@ -275,11 +275,17 @@ def check_position_rating(callsign, rating):
         return f"⚠️ Rating不足: {get_rating_str(rating)} が {suffix} を開局（最低 {get_rating_str(min_rating)} 必要）"
     return None
 
-async def check_solo_registration(http_session, callsign, cid):
+async def check_solo_registration(http_session, callsign, cid, current_list=None):
     """_T_付きコールサインがsolo.txtに登録されているかチェック。
+    日本空域にInstructor(I1+)がオンラインなら監督付きOJTとみなし警告しない。
     Returns: 警告文字列 or None"""
     if "_T_" not in callsign:
         return None
+    # 日本空域にInstructor(I1/I2/I3, rating>=8)がオンラインなら監督付きOJTとみなす
+    if current_list:
+        for info in current_list.values():
+            if info["rating"] >= 8:
+                return None
     if not solo_validation_url:
         return None
     solo_list = await fetch_solo_list(http_session)
@@ -424,7 +430,7 @@ async def get_discord_embed(connect_type, atc_info, current_list, http_session=N
             rating_warn = check_position_rating(atc_info["callsign"], atc_info["rating"])
             if rating_warn:
                 warnings.append(rating_warn)
-            solo_warn = await check_solo_registration(http_session, atc_info["callsign"], atc_info["cid"])
+            solo_warn = await check_solo_registration(http_session, atc_info["callsign"], atc_info["cid"], current_list)
             if solo_warn:
                 warnings.append(solo_warn)
         if warnings:
