@@ -44,6 +44,8 @@ if not discord_bot_client_token:
     sys.exit(1)
 discord_channel_id = int(config["DISCORD_CONFIG"]["discord_channel_id"])
 
+solo_validation_url = config.get("VATSIM_CONFIG", "solo_validation_url", fallback=None)
+
 data_filename = config["DATAFILE_CONFIG"]["data_filename"]
 nickname_filename = config.get("DATAFILE_CONFIG", "nickname_filename", fallback="nicknames.json")
 stats_db_filename = config.get("DATAFILE_CONFIG", "stats_db_filename", fallback="stats.db")
@@ -218,6 +220,78 @@ def get_rating_str(rating):
         return rating_list[rating]
     return f"Unknown({rating})"
 
+# ── OJT/Rating validation ────────────────────────────────────────
+
+_solo_cache = []
+_solo_cache_time = None
+SOLO_CACHE_TTL = 600  # 10分
+
+async def fetch_solo_list(http_session):
+    """solo.txtを取得・パースしてキャッシュを更新"""
+    global _solo_cache, _solo_cache_time
+    if not solo_validation_url:
+        return []
+    now = datetime.now(timezone.utc)
+    if _solo_cache_time and (now - _solo_cache_time).total_seconds() < SOLO_CACHE_TTL:
+        return _solo_cache
+    try:
+        async with http_session.get(solo_validation_url) as resp:
+            text = await resp.text()
+        entries = []
+        for line in text.strip().splitlines():
+            parts = line.strip().split(";")
+            if len(parts) >= 4:
+                try:
+                    entries.append({
+                        "cid": int(parts[0]),
+                        "callsign": parts[1],
+                        "start": parts[2],
+                        "end": parts[3],
+                    })
+                except ValueError:
+                    continue
+        _solo_cache = entries
+        _solo_cache_time = now
+    except Exception:
+        pass  # キャッシュが古くてもそのまま使う
+    return _solo_cache
+
+POSITION_MIN_RATING = {
+    "DEL": 3, "GND": 3,  # S2
+    "TWR": 3,              # S2
+    "APP": 4, "DEP": 4,   # S3
+    "CTR": 5,              # C1
+}
+
+def check_position_rating(callsign, rating):
+    """Ratingがポジションに対して不足していないかチェック。
+    Returns: 警告文字列 or None"""
+    is_ojt = "_T_" in callsign
+    suffix = callsign.rsplit("_", 1)[-1] if "_" in callsign else None
+    if suffix not in POSITION_MIN_RATING:
+        return None
+    min_rating = POSITION_MIN_RATING[suffix]
+    if not is_ojt and rating < min_rating:
+        return f"⚠️ Rating不足: {get_rating_str(rating)} が {suffix} を開局（最低 {get_rating_str(min_rating)} 必要）"
+    return None
+
+async def check_solo_registration(http_session, callsign, cid):
+    """_T_付きコールサインがsolo.txtに登録されているかチェック。
+    Returns: 警告文字列 or None"""
+    if "_T_" not in callsign:
+        return None
+    if not solo_validation_url:
+        return None
+    solo_list = await fetch_solo_list(http_session)
+    if not solo_list:
+        return None  # solo.txt取得不可時は警告しない
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    for entry in solo_list:
+        if entry["cid"] == cid and entry["callsign"] == callsign:
+            if entry["start"] <= today <= entry["end"]:
+                return None  # 登録あり・有効期間内
+    return f"⚠️ solo.txt未登録のOJT（{callsign}）"
+
 # ── Bot class ──────────────────────────────────────────────────────
 
 class VATJPNBot(discord.Client):
@@ -246,9 +320,9 @@ class VATJPNBot(discord.Client):
             if channel is None:
                 return
             for a in connected:
-                await channel.send(embed=get_discord_embed('connect', connected[a], all_controllers))
+                await channel.send(embed=await get_discord_embed('connect', connected[a], all_controllers, self.http_session))
             for a in disconnected:
-                await channel.send(embed=get_discord_embed('disconnect', disconnected[a], all_controllers))
+                await channel.send(embed=await get_discord_embed('disconnect', disconnected[a], all_controllers))
                 log_session(disconnected[a])
         except Exception:
             traceback.print_exc()
@@ -339,15 +413,29 @@ def format_duration_seconds(total_seconds):
         return f"{hours}時間{minutes:02d}分"
     return f"{minutes}分"
 
-def get_discord_embed(connect_type, atc_info, current_list):
+async def get_discord_embed(connect_type, atc_info, current_list, http_session=None):
     online_entries = [format_online_entry(current_list[d]) for d in current_list]
     display_name = get_display_name(atc_info["cid"])
 
     if connect_type == "connect":
-        embed = discord.Embed(title=atc_info['callsign'] + ' - ' + connect_type, color=0x00ff00, description='< online list >\n' + '\n'.join(online_entries))
+        color = 0x00ff00
+        warnings = []
+        if http_session:
+            rating_warn = check_position_rating(atc_info["callsign"], atc_info["rating"])
+            if rating_warn:
+                warnings.append(rating_warn)
+            solo_warn = await check_solo_registration(http_session, atc_info["callsign"], atc_info["cid"])
+            if solo_warn:
+                warnings.append(solo_warn)
+        if warnings:
+            color = 0xffa500
+
+        embed = discord.Embed(title=atc_info['callsign'] + ' - ' + connect_type, color=color, description='< online list >\n' + '\n'.join(online_entries))
         embed.add_field(name='Rating', value=get_rating_str(atc_info["rating"]))
         embed.add_field(name='CID', value=display_name)
         embed.add_field(name='Server', value=atc_info["server"])
+        if warnings:
+            embed.add_field(name='警告', value='\n'.join(warnings), inline=False)
         return embed
 
     if connect_type == "disconnect":
