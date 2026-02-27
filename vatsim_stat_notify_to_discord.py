@@ -277,14 +277,14 @@ def check_position_rating(callsign, rating):
 
 async def check_solo_registration(http_session, callsign, cid, current_list=None):
     """_T_付きコールサインがsolo.txtに登録されているかチェック。
-    日本空域にC1以上の管制官がオンラインなら監督付きOJTとみなし警告しない。
+    日本空域に_I_付きコールサイン（監督者）がオンラインなら監督付きOJTとみなし警告しない。
     Returns: 警告文字列 or None"""
     if "_T_" not in callsign:
         return None
-    # 日本空域にC1以上(rating>=5)がオンラインなら監督付きOJTとみなす
+    # 日本空域に_I_付き（Instructor/Mentor）がオンラインなら監督付きOJTとみなす
     if current_list:
         for info in current_list.values():
-            if info["rating"] >= 5:
+            if "_I_" in info["callsign"]:
                 return None
     if not solo_validation_url:
         return None
