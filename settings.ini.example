@@ -2,6 +2,8 @@
 vatsim_stat_json_url=https://data.vatsim.net/v3/vatsim-data.json
 vatsim_stat_retrieve_period=15
 vatsim_controller_callsign_filter_regex=(^RJ|^ROAH|^ROB|^ROD|^ROI|^ROK|^ROM|^ROR|^ROT|^ROY|^VATJ|^OKA_|^FUK_|^KOJ_|^TYO_|^HDK_|^SRK_)[A-Za-z_][A-Za-z_]([0-9]|[A-Za-z_]|$)([0-9]|[A-Za-z_]|$)+$(?<!_OBS)
+# OJT/Rating警告機能（オプション: 設定しなければ機能無効）
+solo_validation_url=http://vatjpn.org/clc/solo.txt
 
 [DISCORD_CONFIG]
 discord_channel_id=YOUR_CHANNEL_ID
