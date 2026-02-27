@@ -488,7 +488,7 @@ async def online_command(interaction: discord.Interaction):
         await interaction.followup.send(embed=embed)
     except Exception as e:
         traceback.print_exc()
-        await interaction.followup.send(f"エラーが発生しました: {e}")
+        await interaction.followup.send("エラーが発生しました。しばらくしてから再度お試しください。")
 
 nickname_group = app_commands.Group(name="nickname", description="CIDニックネーム管理")
 
@@ -557,7 +557,7 @@ async def sup_command(interaction: discord.Interaction):
         await interaction.followup.send(embed=embed)
     except Exception as e:
         traceback.print_exc()
-        await interaction.followup.send(f"エラーが発生しました: {e}")
+        await interaction.followup.send("エラーが発生しました。しばらくしてから再度お試しください。")
 
 @bot.tree.command(name="traffic", description="指定空港の発着予定トラフィック一覧")
 @app_commands.describe(icao="空港のICAOコード（例: RJTT）")
@@ -651,7 +651,7 @@ async def traffic_command(interaction: discord.Interaction, icao: str):
         await interaction.followup.send(embed=embed)
     except Exception as e:
         traceback.print_exc()
-        await interaction.followup.send(f"エラーが発生しました: {e}")
+        await interaction.followup.send("エラーが発生しました。しばらくしてから再度お試しください。")
 
 @bot.tree.command(name="stats", description="日本空域の管制統計を表示")
 @app_commands.describe(
@@ -732,7 +732,7 @@ async def stats_command(interaction: discord.Interaction, days: int = 7, positio
         await interaction.followup.send(embed=embed)
     except Exception as e:
         traceback.print_exc()
-        await interaction.followup.send(f"エラーが発生しました: {e}")
+        await interaction.followup.send("エラーが発生しました。しばらくしてから再度お試しください。")
 
 # ── MyStats commands ──────────────────────────────────────────────
 
@@ -773,7 +773,7 @@ async def mystats_show(interaction: discord.Interaction):
         await interaction.followup.send(embed=embed)
     except Exception as e:
         traceback.print_exc()
-        await interaction.followup.send(f"エラーが発生しました: {e}")
+        await interaction.followup.send("エラーが発生しました。しばらくしてから再度お試しください。")
 
 @mystats_group.command(name="user", description="指定CIDの管制統計を表示")
 @app_commands.describe(cid="VATSIM CID")
@@ -790,7 +790,7 @@ async def mystats_user(interaction: discord.Interaction, cid: int):
         await interaction.followup.send(embed=embed)
     except Exception as e:
         traceback.print_exc()
-        await interaction.followup.send(f"エラーが発生しました: {e}")
+        await interaction.followup.send("エラーが発生しました。しばらくしてから再度お試しください。")
 
 bot.tree.add_command(mystats_group)
 
