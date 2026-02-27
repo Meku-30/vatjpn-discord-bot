@@ -224,7 +224,7 @@ def get_rating_str(rating):
 
 _solo_cache = []
 _solo_cache_time = None
-SOLO_CACHE_TTL = 600  # 10分
+SOLO_CACHE_TTL = 43200  # 12時間
 
 async def fetch_solo_list(http_session):
     """solo.txtを取得・パースしてキャッシュを更新"""
