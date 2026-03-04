@@ -46,6 +46,19 @@ discord_channel_id = int(config["DISCORD_CONFIG"]["discord_channel_id"])
 
 solo_validation_url = config.get("VATSIM_CONFIG", "solo_validation_url", fallback=None)
 
+# ── SWIM API (NOTAM) ─────────────────────────────────────────────
+swim_api_url = os.environ.get("SWIM_API_URL", "https://SWIM_API_HOST")
+swim_api_token = os.environ.get("SWIM_API_TOKEN")
+
+JAPAN_MAJOR_AIRPORTS = {
+    "RJTT": "羽田",
+    "RJAA": "成田",
+    "RJBB": "関西",
+    "RJOO": "伊丹",
+    "RJFF": "福岡",
+    "RJCC": "新千歳",
+}
+
 data_filename = config["DATAFILE_CONFIG"]["data_filename"]
 nickname_filename = config.get("DATAFILE_CONFIG", "nickname_filename", fallback="nicknames.json")
 stats_db_filename = config.get("DATAFILE_CONFIG", "stats_db_filename", fallback="stats.db")
@@ -453,6 +466,29 @@ async def get_discord_embed(connect_type, atc_info, current_list, http_session=N
             embed.add_field(name='接続時間', value=format_duration(atc_info["logon_time"]))
         return embed
 
+# ── NOTAM helper ──────────────────────────────────────────────────
+
+async def fetch_notams(http_session, icao):
+    """SWIM非公式APIから有効なNOTAMを取得。Returns (notams_list, total_count, error_msg)."""
+    if not swim_api_token:
+        return [], 0, "NOTAM機能を使用するにはSWIM_API_TOKEN環境変数の設定が必要です。"
+    headers = {"Authorization": f"Bearer {swim_api_token}"}
+    url = f"{swim_api_url}/api/notams/active"
+    params = {"icao": icao.upper()}
+    try:
+        async with http_session.get(url, headers=headers, params=params) as resp:
+            if resp.status == 401 or resp.status == 403:
+                return [], 0, "SWIM APIの認証に失敗しました。トークンを確認してください。"
+            if resp.status != 200:
+                return [], 0, f"SWIM APIエラー (HTTP {resp.status})"
+            notams = await resp.json()
+    except asyncio.TimeoutError:
+        return [], 0, "NOTAM情報の取得がタイムアウトしました。"
+    except Exception:
+        traceback.print_exc()
+        return [], 0, "NOTAM情報の取得に失敗しました。"
+    return notams, len(notams), None
+
 # ── Slash commands ─────────────────────────────────────────────────
 
 @bot.tree.command(name="online", description="日本空域のオンライン管制官を表示")
@@ -556,6 +592,72 @@ async def sup_command(interaction: discord.Interaction):
         embed.set_footer(text=f"Total: {len(sups)} supervisor(s)")
         await interaction.followup.send(embed=embed)
     except Exception as e:
+        traceback.print_exc()
+        await interaction.followup.send("エラーが発生しました。しばらくしてから再度お試しください。")
+
+@bot.tree.command(name="notam", description="空港のNOTAMを表示")
+@app_commands.describe(icao="空港のICAOコード（例: RJTT）または 'japan' で主要空港一括表示")
+async def notam_command(interaction: discord.Interaction, icao: str):
+    await interaction.response.defer()
+    try:
+        icao_input = icao.strip().upper()
+
+        if icao_input == "JAPAN":
+            # 主要空港一括サマリー
+            tasks_list = [fetch_notams(bot.http_session, code) for code in JAPAN_MAJOR_AIRPORTS]
+            results = await asyncio.gather(*tasks_list, return_exceptions=True)
+            lines = []
+            for (code, name), result in zip(JAPAN_MAJOR_AIRPORTS.items(), results):
+                if isinstance(result, Exception):
+                    lines.append(f"**{code}** ({name}): エラー")
+                else:
+                    _, total_count, error = result
+                    if error:
+                        lines.append(f"**{code}** ({name}): {error}")
+                    else:
+                        lines.append(f"**{code}** ({name}): {total_count}件")
+            embed = discord.Embed(
+                title="Japan NOTAM Summary",
+                color=0xff9900,
+                description="\n".join(lines),
+            )
+            embed.set_footer(text="Data source: SWIM非公式API")
+            await interaction.followup.send(embed=embed)
+            return
+
+        # 単一空港
+        notams, total_count, error = await fetch_notams(bot.http_session, icao_input)
+        if error:
+            await interaction.followup.send(error)
+            return
+        if not notams:
+            await interaction.followup.send(f"**{icao_input}** の有効なNOTAMはありません。")
+            return
+
+        lines = []
+        for n in notams[:10]:
+            notam_id = n.get("notam_id", "?")
+            body = n.get("body", "")
+            if len(body) > 200:
+                body = body[:197] + "..."
+            valid_from = (n.get("valid_from") or "")[:16]
+            valid_to = (n.get("valid_to") or "")[:16]
+            period = ""
+            if valid_from or valid_to:
+                period = f"\n  {valid_from} ~ {valid_to}"
+            lines.append(f"**{notam_id}**\n{body}{period}")
+
+        description = "\n\n".join(lines)
+        if len(description) > 4096:
+            description = description[:4093] + "..."
+        embed = discord.Embed(
+            title=f"{icao_input} NOTAM ({total_count}件)",
+            color=0xff9900,
+            description=description,
+        )
+        embed.set_footer(text="Data source: SWIM非公式API")
+        await interaction.followup.send(embed=embed)
+    except Exception:
         traceback.print_exc()
         await interaction.followup.send("エラーが発生しました。しばらくしてから再度お試しください。")
 
