@@ -13,7 +13,6 @@ data_filename=data.json
 nickname_filename=nicknames.json
 stats_db_filename=stats.db
 
-# NOTAM feature requires FAA API credentials in .env:
-#   FAA_CLIENT_ID=your_id
-#   FAA_CLIENT_SECRET=your_secret
-# Register at https://api.faa.gov/s/
+# NOTAM feature requires SWIM API credentials in environment variables:
+#   SWIM_API_URL=http://swim-api:8000  (default: https://SWIM_API_HOST)
+#   SWIM_API_TOKEN=your_bearer_token
