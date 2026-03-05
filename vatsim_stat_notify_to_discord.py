@@ -511,6 +511,29 @@ async def fetch_atis(http_session, icao):
         return None, "ATIS情報の取得に失敗しました。"
     return atis, None
 
+# ── METAR helper ──────────────────────────────────────────────────
+
+async def fetch_metar(http_session, icao):
+    """SWIM非公式APIから最新METARを取得。Returns (metar_dict, error_msg)."""
+    if not swim_api_token:
+        return None, "METAR機能を使用するにはSWIM_API_TOKEN環境変数の設定が必要です。"
+    headers = {"Authorization": f"Bearer {swim_api_token}"}
+    url = f"{swim_api_url}/api/weather/{icao.upper()}"
+    try:
+        async with http_session.get(url, headers=headers) as resp:
+            if resp.status == 401 or resp.status == 403:
+                return None, "SWIM APIの認証に失敗しました。トークンを確認してください。"
+            if resp.status != 200:
+                return None, f"SWIM APIエラー (HTTP {resp.status})"
+            weather_list = await resp.json()
+    except asyncio.TimeoutError:
+        return None, "METAR情報の取得がタイムアウトしました。"
+    except Exception:
+        traceback.print_exc()
+        return None, "METAR情報の取得に失敗しました。"
+    metar = next((w for w in weather_list if w.get("type") == "METAR"), None)
+    return metar, None
+
 # ── Slash commands ─────────────────────────────────────────────────
 
 @bot.tree.command(name="online", description="日本空域のオンライン管制官を表示")
@@ -716,6 +739,41 @@ async def atis_command(interaction: discord.Interaction, icao: str):
         footer_parts = []
         if issued_at:
             footer_parts.append(f"Issued: {issued_at[:16]}Z")
+        footer_parts.append("Data source: SWIM非公式API")
+        embed.set_footer(text=" | ".join(footer_parts))
+        await interaction.followup.send(embed=embed)
+    except Exception:
+        traceback.print_exc()
+        await interaction.followup.send("エラーが発生しました。しばらくしてから再度お試しください。")
+
+@bot.tree.command(name="metar", description="空港のMETAR情報を表示")
+@app_commands.describe(icao="空港のICAOコード（例: RJTT）")
+async def metar_command(interaction: discord.Interaction, icao: str):
+    await interaction.response.defer()
+    try:
+        icao_input = icao.strip().upper()
+        metar, error = await fetch_metar(bot.http_session, icao_input)
+        if error:
+            await interaction.followup.send(error)
+            return
+        if not metar:
+            await interaction.followup.send(f"**{icao_input}** のMETARデータがありません。")
+            return
+
+        raw_text = metar.get("raw_text", "")
+        observed_at = metar.get("observed_at")
+
+        if len(raw_text) > 4096:
+            raw_text = raw_text[:4093] + "..."
+
+        embed = discord.Embed(
+            title=f"{icao_input} METAR",
+            color=0x00bfff,
+            description=raw_text,
+        )
+        footer_parts = []
+        if observed_at:
+            footer_parts.append(f"Observed: {observed_at[:16]}Z")
         footer_parts.append("Data source: SWIM非公式API")
         embed.set_footer(text=" | ".join(footer_parts))
         await interaction.followup.send(embed=embed)
