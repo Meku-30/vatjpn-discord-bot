@@ -489,6 +489,28 @@ async def fetch_notams(http_session, icao):
         return [], 0, "NOTAM情報の取得に失敗しました。"
     return notams, len(notams), None
 
+# ── ATIS helper ───────────────────────────────────────────────────
+
+async def fetch_atis(http_session, icao):
+    """SWIM非公式APIから最新ATISを取得。Returns (atis_dict, error_msg)."""
+    if not swim_api_token:
+        return None, "ATIS機能を使用するにはSWIM_API_TOKEN環境変数の設定が必要です。"
+    headers = {"Authorization": f"Bearer {swim_api_token}"}
+    url = f"{swim_api_url}/api/atis/{icao.upper()}"
+    try:
+        async with http_session.get(url, headers=headers) as resp:
+            if resp.status == 401 or resp.status == 403:
+                return None, "SWIM APIの認証に失敗しました。トークンを確認してください。"
+            if resp.status != 200:
+                return None, f"SWIM APIエラー (HTTP {resp.status})"
+            atis = await resp.json()
+    except asyncio.TimeoutError:
+        return None, "ATIS情報の取得がタイムアウトしました。"
+    except Exception:
+        traceback.print_exc()
+        return None, "ATIS情報の取得に失敗しました。"
+    return atis, None
+
 # ── Slash commands ─────────────────────────────────────────────────
 
 @bot.tree.command(name="online", description="日本空域のオンライン管制官を表示")
@@ -656,6 +678,46 @@ async def notam_command(interaction: discord.Interaction, icao: str):
             description=description,
         )
         embed.set_footer(text="Data source: SWIM非公式API")
+        await interaction.followup.send(embed=embed)
+    except Exception:
+        traceback.print_exc()
+        await interaction.followup.send("エラーが発生しました。しばらくしてから再度お試しください。")
+
+@bot.tree.command(name="atis", description="空港のATIS情報を表示")
+@app_commands.describe(icao="空港のICAOコード（例: RJTT）")
+async def atis_command(interaction: discord.Interaction, icao: str):
+    await interaction.response.defer()
+    try:
+        icao_input = icao.strip().upper()
+        atis, error = await fetch_atis(bot.http_session, icao_input)
+        if error:
+            await interaction.followup.send(error)
+            return
+        if not atis:
+            await interaction.followup.send(f"**{icao_input}** のATISデータがありません。")
+            return
+
+        atis_letter = atis.get("atis_letter")
+        content = atis.get("content", "")
+        issued_at = atis.get("issued_at")
+
+        title = f"{icao_input} ATIS"
+        if atis_letter:
+            title += f" - {atis_letter}"
+
+        if len(content) > 4096:
+            content = content[:4093] + "..."
+
+        embed = discord.Embed(
+            title=title,
+            color=0x00bfff,
+            description=content,
+        )
+        footer_parts = []
+        if issued_at:
+            footer_parts.append(f"Issued: {issued_at[:16]}Z")
+        footer_parts.append("Data source: SWIM非公式API")
+        embed.set_footer(text=" | ".join(footer_parts))
         await interaction.followup.send(embed=embed)
     except Exception:
         traceback.print_exc()
