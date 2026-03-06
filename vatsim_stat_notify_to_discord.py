@@ -832,20 +832,20 @@ async def atis_command(interaction: discord.Interaction, icao: str):
 
             # エリア別にEmbed分割
             atis_regions = [
-                ("北海道・東北", "RJCC", "RJSN"),
-                ("関東・甲信越", "RJAA", "RJGG"),
-                ("近畿・中国・四国", "RJOO", "RJOK"),
-                ("九州", "RJFF", "RJFK"),
-                ("沖縄・先島", "ROAH", "ROIG"),
+                ("RJCC", "RJSN"),
+                ("RJAA", "RJGG"),
+                ("RJOO", "RJOK"),
+                ("RJFF", "RJFK"),
+                ("ROAH", "ROIG"),
             ]
             region_bounds = []
-            for label, start, end in atis_regions:
+            for start, end in atis_regions:
                 s = AIRPORT_ORDER_MAP.get(start, 0)
                 e = AIRPORT_ORDER_MAP.get(end, 999)
-                region_bounds.append((label, s, e))
+                region_bounds.append((s, e))
 
             embeds = []
-            for label, s, e in region_bounds:
+            for s, e in region_bounds:
                 lines = []
                 for atis in atis_list:
                     idx = AIRPORT_ORDER_MAP.get(atis.get("icao_code", ""), -1)
@@ -861,12 +861,12 @@ async def atis_command(interaction: discord.Interaction, icao: str):
                     description = "\n\n".join(lines)
                     if len(description) > 4096:
                         description = description[:4093] + "..."
-                    embeds.append(discord.Embed(title=label, color=0x00bfff, description=description))
+                    embeds.append(discord.Embed(color=0x00bfff, description=description))
 
             if not embeds:
                 await interaction.followup.send("ATISデータがありません。")
                 return
-            embeds[0].title = f"Japan ATIS ({len(atis_list)}空港) — {embeds[0].title}"
+            embeds[0].title = f"Japan ATIS ({len(atis_list)}空港)"
             await interaction.followup.send(embeds=embeds[:10])
             return
 
