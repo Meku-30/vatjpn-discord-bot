@@ -11,6 +11,8 @@ import os
 import sys
 import sqlite3
 from datetime import datetime, timezone, timedelta
+import io
+from staticmap import StaticMap, CircleMarker
 
 logging.basicConfig(
     level=logging.INFO,
@@ -434,7 +436,8 @@ class VATJPNBot(discord.Client):
                 if cn in self.pirep_notified:
                     continue
                 self.pirep_notified.add(cn)
-                await channel.send(embed=build_pirep_embed(p))
+                embed, map_file = build_pirep_embed(p)
+                await channel.send(embed=embed, file=map_file) if map_file else await channel.send(embed=embed)
 
         except Exception:
             logger.exception("PIREPポーリングエラー")
@@ -771,8 +774,42 @@ def format_pirep_location(pirep):
     except (ValueError, IndexError):
         return f"{lat}/{lon}"
 
+def parse_pirep_coords(pirep):
+    """PIREPの緯度経度を十進度に変換する。変換できない場合はNone。"""
+    lat_raw, lon_raw = pirep.get("latitude"), pirep.get("longitude")
+    if not lat_raw or not lon_raw:
+        return None
+    try:
+        lat = int(lat_raw[:2]) + int(lat_raw[2:]) / 60
+        lon = int(lon_raw[:3]) + int(lon_raw[3:]) / 60
+        return lat, lon
+    except (ValueError, IndexError):
+        return None
+
+# 日本の陸地の大まかな範囲
+JAPAN_BBOX = {"lat_min": 24, "lat_max": 46, "lon_min": 122, "lon_max": 146}
+JAPAN_REF = (138, 36)  # 本州中部
+
+def generate_pirep_map(lat, lon):
+    """PIREP位置のスタティックマップを生成し、discord.Fileとして返す。"""
+    m = StaticMap(400, 300, url_template="https://tile.openstreetmap.org/{z}/{x}/{y}.png")
+    m.add_marker(CircleMarker((lon, lat), "red", 12))
+
+    near_japan = (JAPAN_BBOX["lat_min"] <= lat <= JAPAN_BBOX["lat_max"]
+                  and JAPAN_BBOX["lon_min"] <= lon <= JAPAN_BBOX["lon_max"])
+    if near_japan:
+        image = m.render(zoom=7)
+    else:
+        m.add_marker(CircleMarker(JAPAN_REF, "#00000001", 1))
+        image = m.render()
+
+    buf = io.BytesIO()
+    image.save(buf, format="PNG")
+    buf.seek(0)
+    return discord.File(buf, filename="pirep_map.png")
+
 def build_pirep_embed(pirep):
-    """MOD以上のPIREP用Embedを作成する。"""
+    """MOD以上のPIREP用Embedとマップファイルを作成する。(embed, file_or_none)を返す。"""
     strength_code = pirep.get("turbulence_strength", "")
     strength_label = TURBULENCE_MAP.get(strength_code, strength_code)
     level = turbulence_level(strength_code)
@@ -791,6 +828,16 @@ def build_pirep_embed(pirep):
     embed.add_field(name="高度", value=format_pirep_altitude(pirep), inline=True)
     embed.add_field(name="位置", value=format_pirep_location(pirep), inline=True)
 
+    # マップ画像生成
+    map_file = None
+    coords = parse_pirep_coords(pirep)
+    if coords:
+        try:
+            map_file = generate_pirep_map(*coords)
+            embed.set_image(url="attachment://pirep_map.png")
+        except Exception:
+            logger.warning("PIREPマップ生成失敗", exc_info=True)
+
     observed = pirep.get("observed_at", "")
     effective_end = pirep.get("effective_end", "")
     time_str = ""
@@ -801,7 +848,7 @@ def build_pirep_embed(pirep):
     if time_str:
         embed.set_footer(text=time_str)
 
-    return embed
+    return embed, map_file
 
 # ── Slash commands ─────────────────────────────────────────────────
 
