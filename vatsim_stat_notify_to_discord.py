@@ -581,6 +581,26 @@ async def fetch_atis(http_session, icao):
         return None, "ATIS情報の取得に失敗しました。"
     return atis, None
 
+async def fetch_all_atis(http_session):
+    """SWIM非公式APIから全空港ATISを一括取得。Returns (atis_list, error_msg)."""
+    if not swim_api_token:
+        return [], "ATIS機能を使用するにはSWIM_API_TOKEN環境変数の設定が必要です。"
+    headers = {"Authorization": f"Bearer {swim_api_token}"}
+    url = f"{swim_api_url}/api/atis"
+    try:
+        async with http_session.get(url, headers=headers) as resp:
+            if resp.status == 401 or resp.status == 403:
+                return [], "SWIM APIの認証に失敗しました。トークンを確認してください。"
+            if resp.status != 200:
+                return [], f"SWIM APIエラー (HTTP {resp.status})"
+            atis_list = await resp.json()
+    except asyncio.TimeoutError:
+        return [], "ATIS情報の取得がタイムアウトしました。"
+    except Exception:
+        traceback.print_exc()
+        return [], "ATIS情報の取得に失敗しました。"
+    return atis_list or [], None
+
 # ── METAR helper ──────────────────────────────────────────────────
 
 async def fetch_metar(http_session, icao):
@@ -774,36 +794,37 @@ async def atis_command(interaction: discord.Interaction, icao: str):
         icao_input = icao.strip().upper()
 
         if icao_input == "JAPAN":
-            tasks_list = [fetch_atis(bot.http_session, code) for code in JAPAN_MAJOR_AIRPORTS]
-            results = await asyncio.gather(*tasks_list, return_exceptions=True)
+            atis_list, error = await fetch_all_atis(bot.http_session)
+            if error:
+                await interaction.followup.send(error)
+                return
+            if not atis_list:
+                await interaction.followup.send("ATISデータがありません。")
+                return
+
+            # 複数Embedに分割（各Embed 4096文字制限、1メッセージ最大10 Embed）
+            embeds = []
             lines = []
-            for (code, name), result in zip(JAPAN_MAJOR_AIRPORTS.items(), results):
-                if isinstance(result, Exception):
-                    lines.append(f"**{code}** ({name}): エラー")
-                else:
-                    atis, error = result
-                    if error:
-                        lines.append(f"**{code}** ({name}): {error}")
-                    elif not atis:
-                        lines.append(f"**{code}** ({name}): データなし")
-                    else:
-                        letter = atis.get("atis_letter", "")
-                        content = atis.get("content", "")
-                        if len(content) > 300:
-                            content = content[:297] + "..."
-                        header = f"**{code}** ({name})"
-                        if letter:
-                            header += f" - **{letter}**"
-                        lines.append(f"{header}\n{content}")
-            description = "\n\n".join(lines)
-            if len(description) > 4096:
-                description = description[:4093] + "..."
-            embed = discord.Embed(
-                title="Japan ATIS Summary",
-                color=0x00bfff,
-                description=description,
-            )
-            await interaction.followup.send(embed=embed)
+            current_len = 0
+            for atis in atis_list:
+                icao = atis.get("icao_code", "?")
+                letter = atis.get("atis_letter", "")
+                content = atis.get("content", "")
+                header = f"**{icao}**"
+                if letter:
+                    header += f" - **{letter}**"
+                entry = f"{header}\n{content}"
+                entry_len = len(entry) + 2  # +2 for "\n\n" separator
+                if current_len + entry_len > 4000 and lines:
+                    embeds.append(discord.Embed(color=0x00bfff, description="\n\n".join(lines)))
+                    lines = []
+                    current_len = 0
+                lines.append(entry)
+                current_len += entry_len
+            if lines:
+                embeds.append(discord.Embed(color=0x00bfff, description="\n\n".join(lines)))
+            embeds[0].title = f"Japan ATIS ({len(atis_list)}空港)"
+            await interaction.followup.send(embeds=embeds[:10])
             return
 
         atis, error = await fetch_atis(bot.http_session, icao_input)

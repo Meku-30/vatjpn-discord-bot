@@ -34,7 +34,7 @@ VATSIM 日本空域の ATC 管制官のオンライン/オフライン状況を 
 - **管制統計** - ログアウト時にセッションを SQLite に記録し、`/stats` で期間別・ポジション別の統計を表示
 - **Supervisor 一覧** - VATSIM ネットワーク全体のオンライン SUP/ADM を表示
 - **NOTAM 表示** - SWIM非公式APIから日本空域の有効な NOTAM を取得・表示。`/notam japan` で主要6空港の一括サマリー、`keyword` オプションでキーワード絞り込み（例: RWY, ILS, TWY）、5件ずつのページネーションボタン対応
-- **ATIS 表示** - SWIM非公式APIから空港の最新 ATIS 情報を取得・表示。`/atis japan` で主要6空港の一括サマリーも可能
+- **ATIS 表示** - SWIM非公式APIから空港の最新 ATIS 情報を取得・表示。`/atis japan` で全ATIS発行空港（23空港）を一括表示
 - **METAR 表示** - SWIM非公式APIから空港の最新 METAR を取得・表示
 - **空港トラフィック** - ICAO コードで空港を指定し、出発・到着・プリファイル済みフライトを一覧表示
 - **個人管制統計** - Discord ID と VATSIM CID を紐付けて個人の管制統計を表示。VATSIM API から総管制時間・レーティング情報も取得
