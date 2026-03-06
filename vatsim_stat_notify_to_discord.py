@@ -66,15 +66,30 @@ JAPAN_MAJOR_AIRPORTS = {
     "RJCC": "新千歳",
 }
 
-# ATIS発行空港の緯度（北→南ソート用）
-AIRPORT_LAT = {
-    "RJCC": 42.77, "RJCH": 41.77, "RJSS": 38.14, "RJSN": 37.96,
-    "RJTT": 35.55, "RJAA": 35.76, "RJGG": 34.86, "RJOO": 34.79,
-    "RJOT": 34.76, "RJBE": 34.63, "RJBB": 34.43, "RJOA": 34.44,
-    "RJOM": 33.83, "RJOK": 33.55, "RJFF": 33.59, "RJFO": 33.48,
-    "RJFS": 33.15, "RJFU": 32.92, "RJFT": 32.84, "RJFM": 31.88,
-    "RJFK": 31.80, "ROAH": 26.20, "ROIG": 24.34,
-}
+# 日本空港の表示順（北→南、AIS Japan準拠）
+AIRPORT_ORDER = [
+    "RJCR", "RJCW", "RJER", "RJEB", "RJCM", "RJEC", "RJCA", "RJCN",
+    "RJCK", "RJCT", "RJCB", "RJCO", "RJCJ", "RJCC", "RJEO", "RJCH",
+    "RJSO", "RJSA", "RJSM", "RJSH", "RJSR", "RJSK", "RJSI", "RJSY",
+    "RJSC", "RJST", "RJSU", "RJSS", "RJSF",
+    "RJSD", "RJSN", "RJAF", "RJTU", "RJAH", "RJAK", "RJTL", "RJAA",
+    "RJTJ", "RJTY", "RJTC", "RJTF", "RJTT", "RJTA", "RJTK", "RJTE",
+    "RJTO", "RJAN", "RJAZ", "RJTQ", "RJTH", "RJAW", "RJAM",
+    "RJNW", "RJNT", "RJNK", "RJNF", "RJNG", "RJNA", "RJNY", "RJNS",
+    "RJNH", "RJGG", "RJOE",
+    "RJBT", "RJOO", "RJOY", "RJBE", "RJBB", "RJBD",
+    "RJOR", "RJNO", "RJOH", "RJOC", "RJOW", "RJOB", "RJBK", "RJOA",
+    "RJOI", "RJOF", "RJDC", "RJOZ",
+    "RJOS", "RJOT", "RJOM", "RJOK",
+    "RJDT", "RJDB", "RJFA", "RJFR", "RJFF", "RJFZ", "RJFO", "RJDO",
+    "RJDK",
+    "RJFE", "RJFS", "RJDM", "RJDU", "RJFU", "RJFT", "RJDA", "RJFN",
+    "RJFM", "RJFK", "RJFY",
+    "RJFG", "RJFC", "RJKA", "RJKI", "RJKN", "RJKB", "RORY", "RORE",
+    "RORA", "ROKJ", "RODN", "ROTM", "ROAH", "ROKR", "RORK", "ROMD",
+    "RORS", "ROMY", "RORT", "ROIG", "RORH", "ROYN",
+]
+AIRPORT_ORDER_MAP = {code: i for i, code in enumerate(AIRPORT_ORDER)}
 
 data_filename = config["DATAFILE_CONFIG"]["data_filename"]
 nickname_filename = config.get("DATAFILE_CONFIG", "nickname_filename", fallback="nicknames.json")
@@ -812,8 +827,8 @@ async def atis_command(interaction: discord.Interaction, icao: str):
                 await interaction.followup.send("ATISデータがありません。")
                 return
 
-            # 北→南の順にソート
-            atis_list.sort(key=lambda a: AIRPORT_LAT.get(a.get("icao_code", ""), 0), reverse=True)
+            # 北→南の順にソート（AIS Japan準拠）
+            atis_list.sort(key=lambda a: AIRPORT_ORDER_MAP.get(a.get("icao_code", ""), 999))
 
             # 複数Embedに分割（各Embed 4096文字制限、1メッセージ最大10 Embed）
             embeds = []
