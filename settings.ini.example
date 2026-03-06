@@ -14,5 +14,5 @@ nickname_filename=nicknames.json
 stats_db_filename=stats.db
 
 # NOTAM feature requires SWIM API credentials in environment variables:
-#   SWIM_API_URL=http://swim-api:8000  (default: https://SWIM_API_HOST)
+#   SWIM_API_URL=your_swim_api_url
 #   SWIM_API_TOKEN=your_bearer_token
