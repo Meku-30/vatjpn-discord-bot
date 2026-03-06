@@ -666,7 +666,6 @@ async def notam_command(interaction: discord.Interaction, icao: str):
                 color=0xff9900,
                 description="\n".join(lines),
             )
-            embed.set_footer(text="Data source: SWIM非公式API")
             await interaction.followup.send(embed=embed)
             return
 
@@ -700,7 +699,6 @@ async def notam_command(interaction: discord.Interaction, icao: str):
             color=0xff9900,
             description=description,
         )
-        embed.set_footer(text="Data source: SWIM非公式API")
         await interaction.followup.send(embed=embed)
     except Exception:
         traceback.print_exc()
@@ -736,11 +734,6 @@ async def atis_command(interaction: discord.Interaction, icao: str):
             color=0x00bfff,
             description=content,
         )
-        footer_parts = []
-        if issued_at:
-            footer_parts.append(f"Issued: {issued_at[:16]}Z")
-        footer_parts.append("Data source: SWIM非公式API")
-        embed.set_footer(text=" | ".join(footer_parts))
         await interaction.followup.send(embed=embed)
     except Exception:
         traceback.print_exc()
@@ -771,11 +764,6 @@ async def metar_command(interaction: discord.Interaction, icao: str):
             color=0x00bfff,
             description=raw_text,
         )
-        footer_parts = []
-        if observed_at:
-            footer_parts.append(f"Observed: {observed_at[:16]}Z")
-        footer_parts.append("Data source: SWIM非公式API")
-        embed.set_footer(text=" | ".join(footer_parts))
         await interaction.followup.send(embed=embed)
     except Exception:
         traceback.print_exc()
