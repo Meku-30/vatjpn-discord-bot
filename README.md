@@ -91,7 +91,7 @@ services:
       - ./:/app
     environment:
       - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
-      - SWIM_API_URL=${SWIM_API_URL:-https://SWIM_API_HOST}
+      - SWIM_API_URL=${SWIM_API_URL}
       - SWIM_API_TOKEN=${SWIM_API_TOKEN}
     command: sh -c "pip install -r requirements.txt && python -u vatsim_stat_notify_to_discord.py"
     restart: always

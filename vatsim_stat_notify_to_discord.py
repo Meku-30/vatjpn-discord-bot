@@ -54,7 +54,7 @@ discord_channel_id = int(discord_channel_id_str) if discord_channel_id_str else 
 solo_validation_url = config.get("VATSIM_CONFIG", "solo_validation_url", fallback=None)
 
 # ── SWIM API (NOTAM) ─────────────────────────────────────────────
-swim_api_url = os.environ.get("SWIM_API_URL", "https://SWIM_API_HOST")
+swim_api_url = os.environ.get("SWIM_API_URL")
 swim_api_token = os.environ.get("SWIM_API_TOKEN")
 
 JAPAN_MAJOR_AIRPORTS = {
@@ -506,8 +506,8 @@ NOTAM_PER_PAGE = 5
 
 async def fetch_notams(http_session, icao):
     """SWIM非公式APIから有効なNOTAMを取得。Returns (notams_list, total_count, error_msg)."""
-    if not swim_api_token:
-        return [], 0, "NOTAM機能を使用するにはSWIM_API_TOKEN環境変数の設定が必要です。"
+    if not swim_api_url or not swim_api_token:
+        return [], 0, "NOTAM機能を使用するにはSWIM_API_URL/SWIM_API_TOKEN環境変数の設定が必要です。"
     headers = {"Authorization": f"Bearer {swim_api_token}"}
     url = f"{swim_api_url}/api/notams/active"
     params = {"icao": icao.upper()}
@@ -588,8 +588,8 @@ class NotamPaginationView(discord.ui.View):
 
 async def fetch_atis(http_session, icao):
     """SWIM非公式APIから最新ATISを取得。Returns (atis_dict, error_msg)."""
-    if not swim_api_token:
-        return None, "ATIS機能を使用するにはSWIM_API_TOKEN環境変数の設定が必要です。"
+    if not swim_api_url or not swim_api_token:
+        return None, "ATIS機能を使用するにはSWIM_API_URL/SWIM_API_TOKEN環境変数の設定が必要です。"
     headers = {"Authorization": f"Bearer {swim_api_token}"}
     url = f"{swim_api_url}/api/atis/{icao.upper()}"
     try:
@@ -608,8 +608,8 @@ async def fetch_atis(http_session, icao):
 
 async def fetch_all_atis(http_session):
     """SWIM非公式APIから全空港ATISを一括取得。Returns (atis_list, error_msg)."""
-    if not swim_api_token:
-        return [], "ATIS機能を使用するにはSWIM_API_TOKEN環境変数の設定が必要です。"
+    if not swim_api_url or not swim_api_token:
+        return [], "ATIS機能を使用するにはSWIM_API_URL/SWIM_API_TOKEN環境変数の設定が必要です。"
     headers = {"Authorization": f"Bearer {swim_api_token}"}
     url = f"{swim_api_url}/api/atis"
     try:
@@ -630,8 +630,8 @@ async def fetch_all_atis(http_session):
 
 async def fetch_metar(http_session, icao):
     """SWIM非公式APIから最新METARを取得。Returns (metar_dict, error_msg)."""
-    if not swim_api_token:
-        return None, "METAR機能を使用するにはSWIM_API_TOKEN環境変数の設定が必要です。"
+    if not swim_api_url or not swim_api_token:
+        return None, "METAR機能を使用するにはSWIM_API_URL/SWIM_API_TOKEN環境変数の設定が必要です。"
     headers = {"Authorization": f"Bearer {swim_api_token}"}
     url = f"{swim_api_url}/api/weather/{icao.upper()}"
     try:
