@@ -13,6 +13,7 @@ data_filename=data.json
 nickname_filename=nicknames.json
 stats_db_filename=stats.db
 
-# NOTAM feature requires SWIM API credentials in environment variables:
+# NOTAM/ATIS/METAR/PIREP features require SWIM API credentials in environment variables:
 #   SWIM_API_URL=your_swim_api_url
 #   SWIM_API_TOKEN=your_bearer_token
+#   ENABLE_PIREP_NOTIFICATIONS=true  (PIREP turbulence auto-notification, default: true)

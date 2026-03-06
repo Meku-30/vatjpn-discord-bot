@@ -36,6 +36,7 @@ VATSIM 日本空域の ATC 管制官のオンライン/オフライン状況を 
 - **NOTAM 表示** - SWIM非公式APIから日本空域の有効な NOTAM を取得・表示。`/notam japan` で主要6空港の一括サマリー、`keyword` オプションでキーワード絞り込み（例: RWY, ILS, TWY）、5件ずつのページネーションボタン対応
 - **ATIS 表示** - SWIM非公式APIから空港の最新 ATIS 情報を取得・表示。`/atis japan` で全ATIS発行空港（23空港）を一括表示
 - **METAR 表示** - SWIM非公式APIから空港の最新 METAR を取得・表示
+- **PIREP タービュランス通知** - SWIM非公式APIからPIREPを5分間隔で自動取得し、MOD（Moderate）以上のタービュランスを検知した場合に自動通知。`ENABLE_PIREP_NOTIFICATIONS` 環境変数でオン/オフ切り替え可能
 - **空港トラフィック** - ICAO コードで空港を指定し、出発・到着・プリファイル済みフライトを一覧表示
 - **個人管制統計** - Discord ID と VATSIM CID を紐付けて個人の管制統計を表示。VATSIM API から総管制時間・レーティング情報も取得
 
@@ -55,9 +56,12 @@ export DISCORD_BOT_TOKEN="your-bot-token-here"
 ```
 DISCORD_BOT_TOKEN=your-bot-token-here
 
-# NOTAM/ATIS/METAR機能（オプション: SWIM非公式APIが必要）
+# NOTAM/ATIS/METAR/PIREP機能（オプション: SWIM非公式APIが必要）
 SWIM_API_URL=http://swim-api:8000
 SWIM_API_TOKEN=your-swim-api-token
+
+# PIREP タービュランス自動通知（デフォルト: true）
+ENABLE_PIREP_NOTIFICATIONS=true
 ```
 
 ### 2. settings.ini の設定
