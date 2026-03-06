@@ -21,6 +21,7 @@ logger = logging.getLogger("vatjpn-bot")
 
 # ── Feature flags ────────────────────────────────────────────────
 enable_notifications = os.environ.get("ENABLE_NOTIFICATIONS", "true").lower() in ("true", "1", "yes")
+enable_pirep_notifications = os.environ.get("ENABLE_PIREP_NOTIFICATIONS", "true").lower() in ("true", "1", "yes")
 
 # ── Config validation ──────────────────────────────────────────────
 
@@ -358,16 +359,22 @@ class VATJPNBot(discord.Client):
         super().__init__(intents=intents)
         self.tree = app_commands.CommandTree(self)
         self.http_session = None
+        self.pirep_notified = set()  # 通知済みPIREPのcontrol_number
+        self._pirep_first_run = True
 
     async def setup_hook(self):
         timeout = aiohttp.ClientTimeout(total=10)
         self.http_session = aiohttp.ClientSession(timeout=timeout)
         if enable_notifications:
             self.polling_loop.start()
+            if enable_pirep_notifications and swim_api_url and swim_api_token:
+                self.pirep_loop.start()
 
     async def close(self):
         if enable_notifications:
             self.polling_loop.cancel()
+            if enable_pirep_notifications and self.pirep_loop.is_running():
+                self.pirep_loop.cancel()
         if self.http_session:
             await self.http_session.close()
         await super().close()
@@ -389,6 +396,56 @@ class VATJPNBot(discord.Client):
 
     @polling_loop.before_loop
     async def before_polling(self):
+        await self.wait_until_ready()
+
+    @tasks.loop(seconds=300)
+    async def pirep_loop(self):
+        try:
+            pireps, err = await fetch_active_pireps(self.http_session)
+            if err:
+                logger.warning("PIREP取得エラー: %s", err)
+                return
+            channel = self.get_channel(discord_channel_id)
+            if channel is None:
+                return
+
+            # MOD以上 (strength >= 4) を抽出
+            mod_plus = [
+                p for p in pireps
+                if p.get("turbulence_strength", "").isdigit()
+                and int(p["turbulence_strength"]) >= 4
+            ]
+
+            # 有効なPIREPのcontrol_number一覧（期限切れを自動クリア用）
+            active_ids = {p["control_number"] for p in pireps}
+            self.pirep_notified &= active_ids
+
+            if self._pirep_first_run:
+                # 初回: 既存PIREPを通知済みに登録し、最新1件だけテスト通知
+                self._pirep_first_run = False
+                for p in mod_plus:
+                    self.pirep_notified.add(p["control_number"])
+                if mod_plus:
+                    latest = mod_plus[0]  # observed_at降順なので先頭が最新
+                    await channel.send(embed=build_pirep_embed(latest))
+                    logger.info("PIREP初回テスト通知: %s", latest["control_number"])
+                else:
+                    logger.info("PIREP監視開始（現在MOD以上のPIREPなし）")
+                return
+
+            # 通常: 新規PIREPのみ通知
+            for p in mod_plus:
+                cn = p["control_number"]
+                if cn in self.pirep_notified:
+                    continue
+                self.pirep_notified.add(cn)
+                await channel.send(embed=build_pirep_embed(p))
+
+        except Exception:
+            logger.exception("PIREPポーリングエラー")
+
+    @pirep_loop.before_loop
+    async def before_pirep_loop(self):
         await self.wait_until_ready()
 
 bot = VATJPNBot()
@@ -655,6 +712,86 @@ async def fetch_metar(http_session, icao):
         return None, "METAR情報の取得に失敗しました。"
     metar = next((w for w in weather_list if w.get("type") == "METAR"), None)
     return metar, None
+
+# ── PIREP helper ─────────────────────────────────────────────────
+
+TURBULENCE_MAP = {
+    "0": "SMTH", "1": "LGTM", "2": "LGT", "3": "LGTP",
+    "4": "MOD", "5": "MODP", "6": "SEV", "7": "EXT",
+}
+
+async def fetch_active_pireps(http_session):
+    """SWIM非公式APIから有効なPIREPを取得。Returns (pirep_list, error_msg)."""
+    if not swim_api_url or not swim_api_token:
+        return [], "PIREP機能を使用するにはSWIM_API_URL/SWIM_API_TOKEN環境変数の設定が必要です。"
+    headers = {"Authorization": f"Bearer {swim_api_token}"}
+    url = f"{swim_api_url}/api/pireps/active"
+    try:
+        async with http_session.get(url, headers=headers) as resp:
+            if resp.status == 401 or resp.status == 403:
+                return [], "SWIM APIの認証に失敗しました。トークンを確認してください。"
+            if resp.status != 200:
+                return [], f"SWIM APIエラー (HTTP {resp.status})"
+            pireps = await resp.json()
+    except asyncio.TimeoutError:
+        return [], "PIREP情報の取得がタイムアウトしました。"
+    except Exception:
+        logger.exception("エラーが発生しました")
+        return [], "PIREP情報の取得に失敗しました。"
+    return pireps or [], None
+
+def format_pirep_altitude(pirep):
+    """PIREPの高度を表示用にフォーマットする。"""
+    alt = pirep.get("altitude")
+    if not alt:
+        return "不明"
+    indicator = pirep.get("altitude_indicator", "")
+    if indicator == "F":
+        return f"FL{alt}"
+    return f"{alt}ft"
+
+def format_pirep_location(pirep):
+    """PIREPの緯度経度を表示用にフォーマットする。"""
+    lat, lon = pirep.get("latitude"), pirep.get("longitude")
+    if not lat or not lon:
+        return "不明"
+    try:
+        lat_deg, lat_min = int(lat[:2]), int(lat[2:])
+        lon_deg, lon_min = int(lon[:3]), int(lon[3:])
+        return f"N{lat_deg}°{lat_min:02d}' E{lon_deg}°{lon_min:02d}'"
+    except (ValueError, IndexError):
+        return f"{lat}/{lon}"
+
+def build_pirep_embed(pirep):
+    """MOD以上のPIREP用Embedを作成する。"""
+    strength_code = pirep.get("turbulence_strength", "")
+    strength_label = TURBULENCE_MAP.get(strength_code, strength_code)
+    is_severe = int(strength_code) >= 6 if strength_code.isdigit() else False
+
+    if is_severe:
+        title = f"🔴 PIREP - {strength_label} Turbulence"
+        color = 0xFF0000
+    else:
+        title = f"⚠️ PIREP - {strength_label} Turbulence"
+        color = 0xFF9900
+
+    body = pirep.get("body", "").strip()
+    embed = discord.Embed(title=title, color=color, description=f"```\n{body}\n```")
+    embed.add_field(name="強度", value=strength_label, inline=True)
+    embed.add_field(name="高度", value=format_pirep_altitude(pirep), inline=True)
+    embed.add_field(name="位置", value=format_pirep_location(pirep), inline=True)
+
+    observed = pirep.get("observed_at", "")
+    effective_end = pirep.get("effective_end", "")
+    time_str = ""
+    if observed:
+        time_str += f"観測: {observed[0:10]} {observed[11:16]}Z"
+    if effective_end:
+        time_str += f"  有効: ~{effective_end[0:10]} {effective_end[11:16]}Z"
+    if time_str:
+        embed.set_footer(text=time_str)
+
+    return embed
 
 # ── Slash commands ─────────────────────────────────────────────────
 
