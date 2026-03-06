@@ -422,16 +422,11 @@ class VATJPNBot(discord.Client):
             self.pirep_notified &= active_ids
 
             if self._pirep_first_run:
-                # 初回: 既存PIREPを通知済みに登録し、最新1件だけテスト通知
+                # 初回: 既存PIREPを全て通知済みに登録（通知はスキップ）
                 self._pirep_first_run = False
                 for p in mod_plus:
                     self.pirep_notified.add(p["control_number"])
-                if mod_plus:
-                    latest = mod_plus[0]  # observed_at降順なので先頭が最新
-                    await channel.send(embed=build_pirep_embed(latest))
-                    logger.info("PIREP初回テスト通知: %s", latest["control_number"])
-                else:
-                    logger.info("PIREP監視開始（現在MOD以上のPIREPなし）")
+                logger.info("PIREP監視開始（既存MOD+: %d件をスキップ）", len(mod_plus))
                 return
 
             # 通常: 新規PIREPのみ通知
