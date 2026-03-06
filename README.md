@@ -85,15 +85,16 @@ nohup python vatsim_stat_notify_to_discord.py &
 ```yaml
 services:
   discord-bot:
-    image: python:3.11-slim
-    working_dir: /app
+    build: .
     volumes:
-      - ./:/app
+      - ./settings.ini:/app/settings.ini:ro
+      - ./data.json:/app/data.json
+      - ./nicknames.json:/app/nicknames.json
+      - ./stats.db:/app/stats.db
     environment:
       - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
       - SWIM_API_URL=${SWIM_API_URL}
       - SWIM_API_TOKEN=${SWIM_API_TOKEN}
-    command: sh -c "pip install -r requirements.txt && python -u vatsim_stat_notify_to_discord.py"
     restart: always
 ```
 

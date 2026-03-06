@@ -1,0 +1,9 @@
+.git
+.gitignore
+*.md
+*.db
+*.log
+*.json
+__pycache__
+.env
+nohup.out
