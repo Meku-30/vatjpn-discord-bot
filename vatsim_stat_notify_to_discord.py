@@ -410,11 +410,10 @@ class VATJPNBot(discord.Client):
             if channel is None:
                 return
 
-            # MOD以上 (strength >= 4) を抽出
+            # MOD以上 (strength >= 4) を抽出（数値・テキスト両対応）
             mod_plus = [
                 p for p in pireps
-                if p.get("turbulence_strength", "").isdigit()
-                and int(p["turbulence_strength"]) >= 4
+                if (turbulence_level(p.get("turbulence_strength", "")) or 0) >= 4
             ]
 
             # 有効なPIREPのcontrol_number一覧（期限切れを自動クリア用）
@@ -716,6 +715,20 @@ TURBULENCE_MAP = {
     "4": "MOD", "5": "MODP", "6": "SEV", "7": "EXT",
 }
 
+# AIREP Specialのテキスト形式 → 数値レベル
+TURBULENCE_TEXT_TO_LEVEL = {
+    "MODERATE": 4,
+    "SEVERE": 6,
+}
+
+def turbulence_level(strength):
+    """turbulence_strengthを数値レベルに変換する（数値・テキスト両対応）。"""
+    if not strength:
+        return None
+    if strength.isdigit():
+        return int(strength)
+    return TURBULENCE_TEXT_TO_LEVEL.get(strength.upper())
+
 async def fetch_active_pireps(http_session):
     """SWIM非公式APIから有効なPIREPを取得。Returns (pirep_list, error_msg)."""
     if not swim_api_url or not swim_api_token:
@@ -762,7 +775,8 @@ def build_pirep_embed(pirep):
     """MOD以上のPIREP用Embedを作成する。"""
     strength_code = pirep.get("turbulence_strength", "")
     strength_label = TURBULENCE_MAP.get(strength_code, strength_code)
-    is_severe = int(strength_code) >= 6 if strength_code.isdigit() else False
+    level = turbulence_level(strength_code)
+    is_severe = level is not None and level >= 6
 
     if is_severe:
         title = f"🔴 PIREP - {strength_label} Turbulence"
