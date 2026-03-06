@@ -12,6 +12,9 @@ import sys
 import sqlite3
 from datetime import datetime, timezone, timedelta
 
+# ── Feature flags ────────────────────────────────────────────────
+enable_notifications = os.environ.get("ENABLE_NOTIFICATIONS", "true").lower() in ("true", "1", "yes")
+
 # ── Config validation ──────────────────────────────────────────────
 
 config = configparser.ConfigParser()
@@ -42,7 +45,11 @@ discord_bot_client_token = os.environ.get("DISCORD_BOT_TOKEN") or config.get("DI
 if not discord_bot_client_token:
     print("ERROR: DISCORD_BOT_TOKEN 環境変数または settings.ini の discord_bot_client_token を設定してください。")
     sys.exit(1)
-discord_channel_id = int(config["DISCORD_CONFIG"]["discord_channel_id"])
+discord_channel_id_str = config["DISCORD_CONFIG"]["discord_channel_id"]
+if enable_notifications and not discord_channel_id_str:
+    print("ERROR: ENABLE_NOTIFICATIONS=true の場合、discord_channel_id の設定が必要です。")
+    sys.exit(1)
+discord_channel_id = int(discord_channel_id_str) if discord_channel_id_str else 0
 
 solo_validation_url = config.get("VATSIM_CONFIG", "solo_validation_url", fallback=None)
 
@@ -323,10 +330,12 @@ class VATJPNBot(discord.Client):
     async def setup_hook(self):
         timeout = aiohttp.ClientTimeout(total=10)
         self.http_session = aiohttp.ClientSession(timeout=timeout)
-        self.polling_loop.start()
+        if enable_notifications:
+            self.polling_loop.start()
 
     async def close(self):
-        self.polling_loop.cancel()
+        if enable_notifications:
+            self.polling_loop.cancel()
         if self.http_session:
             await self.http_session.close()
         await super().close()
@@ -468,6 +477,8 @@ async def get_discord_embed(connect_type, atc_info, current_list, http_session=N
 
 # ── NOTAM helper ──────────────────────────────────────────────────
 
+NOTAM_PER_PAGE = 5
+
 async def fetch_notams(http_session, icao):
     """SWIM非公式APIから有効なNOTAMを取得。Returns (notams_list, total_count, error_msg)."""
     if not swim_api_token:
@@ -488,6 +499,65 @@ async def fetch_notams(http_session, icao):
         traceback.print_exc()
         return [], 0, "NOTAM情報の取得に失敗しました。"
     return notams, len(notams), None
+
+def format_notam_page(notams, page, icao, total_count, keyword=None):
+    """NOTAMリストの指定ページをEmbed形式で生成。"""
+    total_pages = max(1, (len(notams) + NOTAM_PER_PAGE - 1) // NOTAM_PER_PAGE)
+    start = page * NOTAM_PER_PAGE
+    end = start + NOTAM_PER_PAGE
+    page_notams = notams[start:end]
+
+    lines = []
+    for n in page_notams:
+        notam_id = n.get("notam_id", "?")
+        body = n.get("body", "")
+        if len(body) > 200:
+            body = body[:197] + "..."
+        valid_from = (n.get("valid_from") or "")[:16]
+        valid_to = (n.get("valid_to") or "")[:16]
+        period = ""
+        if valid_from or valid_to:
+            period = f"\n  {valid_from} ~ {valid_to}"
+        lines.append(f"**{notam_id}**\n{body}{period}")
+
+    description = "\n\n".join(lines)
+    if len(description) > 4096:
+        description = description[:4093] + "..."
+
+    filter_text = f" (filter: {keyword})" if keyword else ""
+    title = f"{icao} NOTAM ({len(notams)}/{total_count}件){filter_text}"
+    embed = discord.Embed(title=title, color=0xff9900, description=description)
+    embed.set_footer(text=f"Page {page + 1}/{total_pages}")
+    return embed, total_pages
+
+class NotamPaginationView(discord.ui.View):
+    def __init__(self, notams, icao, total_count, keyword=None):
+        super().__init__(timeout=300)
+        self.notams = notams
+        self.icao = icao
+        self.total_count = total_count
+        self.keyword = keyword
+        self.page = 0
+        self.total_pages = max(1, (len(notams) + NOTAM_PER_PAGE - 1) // NOTAM_PER_PAGE)
+        self._update_buttons()
+
+    def _update_buttons(self):
+        self.prev_button.disabled = self.page <= 0
+        self.next_button.disabled = self.page >= self.total_pages - 1
+
+    @discord.ui.button(label="<", style=discord.ButtonStyle.secondary)
+    async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page -= 1
+        self._update_buttons()
+        embed, _ = format_notam_page(self.notams, self.page, self.icao, self.total_count, self.keyword)
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label=">", style=discord.ButtonStyle.secondary)
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page += 1
+        self._update_buttons()
+        embed, _ = format_notam_page(self.notams, self.page, self.icao, self.total_count, self.keyword)
+        await interaction.response.edit_message(embed=embed, view=self)
 
 # ── ATIS helper ───────────────────────────────────────────────────
 
@@ -641,8 +711,11 @@ async def sup_command(interaction: discord.Interaction):
         await interaction.followup.send("エラーが発生しました。しばらくしてから再度お試しください。")
 
 @bot.tree.command(name="notam", description="空港のNOTAMを表示")
-@app_commands.describe(icao="空港のICAOコード（例: RJTT）または 'japan' で主要空港一括表示")
-async def notam_command(interaction: discord.Interaction, icao: str):
+@app_commands.describe(
+    icao="空港のICAOコード（例: RJTT）または 'japan' で主要空港一括表示",
+    keyword="キーワードでNOTAMを絞り込み（例: RWY, ILS, TWY）",
+)
+async def notam_command(interaction: discord.Interaction, icao: str, keyword: str = None):
     await interaction.response.defer()
     try:
         icao_input = icao.strip().upper()
@@ -678,28 +751,17 @@ async def notam_command(interaction: discord.Interaction, icao: str):
             await interaction.followup.send(f"**{icao_input}** の有効なNOTAMはありません。")
             return
 
-        lines = []
-        for n in notams[:10]:
-            notam_id = n.get("notam_id", "?")
-            body = n.get("body", "")
-            if len(body) > 200:
-                body = body[:197] + "..."
-            valid_from = (n.get("valid_from") or "")[:16]
-            valid_to = (n.get("valid_to") or "")[:16]
-            period = ""
-            if valid_from or valid_to:
-                period = f"\n  {valid_from} ~ {valid_to}"
-            lines.append(f"**{notam_id}**\n{body}{period}")
+        # キーワードフィルター
+        if keyword:
+            kw = keyword.strip().upper()
+            notams = [n for n in notams if kw in (n.get("body", "") + " " + n.get("notam_id", "")).upper()]
+            if not notams:
+                await interaction.followup.send(f"**{icao_input}** のNOTAMに「{keyword}」に一致するものはありません。({total_count}件中)")
+                return
 
-        description = "\n\n".join(lines)
-        if len(description) > 4096:
-            description = description[:4093] + "..."
-        embed = discord.Embed(
-            title=f"{icao_input} NOTAM ({total_count}件)",
-            color=0xff9900,
-            description=description,
-        )
-        await interaction.followup.send(embed=embed)
+        embed, total_pages = format_notam_page(notams, 0, icao_input, total_count, keyword)
+        view = NotamPaginationView(notams, icao_input, total_count, keyword) if total_pages > 1 else None
+        await interaction.followup.send(embed=embed, view=view)
     except Exception:
         traceback.print_exc()
         await interaction.followup.send("エラーが発生しました。しばらくしてから再度お試しください。")
@@ -1008,7 +1070,8 @@ bot.tree.add_command(mystats_group)
 
 @bot.event
 async def on_ready():
-    print(f'Logged in as {bot.user}')
+    mode = "notifications + commands" if enable_notifications else "commands only"
+    print(f'Logged in as {bot.user} (mode: {mode})')
     for attempt in range(3):
         try:
             for guild in bot.guilds:
