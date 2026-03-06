@@ -6,11 +6,18 @@ import asyncio
 import json
 import configparser
 import re
-import traceback
+import logging
 import os
 import sys
 import sqlite3
 from datetime import datetime, timezone, timedelta
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger("vatjpn-bot")
 
 # ── Feature flags ────────────────────────────────────────────────
 enable_notifications = os.environ.get("ENABLE_NOTIFICATIONS", "true").lower() in ("true", "1", "yes")
@@ -19,7 +26,7 @@ enable_notifications = os.environ.get("ENABLE_NOTIFICATIONS", "true").lower() in
 
 config = configparser.ConfigParser()
 if not config.read("settings.ini"):
-    print("ERROR: settings.ini が見つかりません。settings.ini.example をコピーして設定してください。")
+    logger.error("settings.ini が見つかりません。settings.ini.example をコピーして設定してください。")
     sys.exit(1)
 
 REQUIRED_CONFIG = {
@@ -29,11 +36,11 @@ REQUIRED_CONFIG = {
 }
 for section, keys in REQUIRED_CONFIG.items():
     if not config.has_section(section):
-        print(f"ERROR: settings.ini にセクション [{section}] がありません。")
+        logger.error("settings.ini にセクション [%s] がありません。", section)
         sys.exit(1)
     for key in keys:
         if not config.has_option(section, key):
-            print(f"ERROR: settings.ini の [{section}] にキー '{key}' がありません。")
+            logger.error("settings.ini の [%s] にキー '%s' がありません。", section, key)
             sys.exit(1)
 
 vatsim_stat_json_url = config["VATSIM_CONFIG"]["vatsim_stat_json_url"]
@@ -43,11 +50,11 @@ pattern = re.compile(vatsim_controller_callsign_filter_regex)
 
 discord_bot_client_token = os.environ.get("DISCORD_BOT_TOKEN") or config.get("DISCORD_CONFIG", "discord_bot_client_token", fallback=None)
 if not discord_bot_client_token:
-    print("ERROR: DISCORD_BOT_TOKEN 環境変数または settings.ini の discord_bot_client_token を設定してください。")
+    logger.error("DISCORD_BOT_TOKEN 環境変数または settings.ini の discord_bot_client_token を設定してください。")
     sys.exit(1)
 discord_channel_id_str = config["DISCORD_CONFIG"]["discord_channel_id"]
 if enable_notifications and not discord_channel_id_str:
-    print("ERROR: ENABLE_NOTIFICATIONS=true の場合、discord_channel_id の設定が必要です。")
+    logger.error("ENABLE_NOTIFICATIONS=true の場合、discord_channel_id の設定が必要です。")
     sys.exit(1)
 discord_channel_id = int(discord_channel_id_str) if discord_channel_id_str else 0
 
@@ -378,7 +385,7 @@ class VATJPNBot(discord.Client):
                 await channel.send(embed=await get_discord_embed('disconnect', disconnected[a], all_controllers))
                 log_session(disconnected[a])
         except Exception:
-            traceback.print_exc()
+            logger.exception("エラーが発生しました")
 
     @polling_loop.before_loop
     async def before_polling(self):
@@ -521,7 +528,7 @@ async def fetch_notams(http_session, icao):
     except asyncio.TimeoutError:
         return [], 0, "NOTAM情報の取得がタイムアウトしました。"
     except Exception:
-        traceback.print_exc()
+        logger.exception("エラーが発生しました")
         return [], 0, "NOTAM情報の取得に失敗しました。"
     return notams, len(notams), None
 
@@ -602,7 +609,7 @@ async def fetch_atis(http_session, icao):
     except asyncio.TimeoutError:
         return None, "ATIS情報の取得がタイムアウトしました。"
     except Exception:
-        traceback.print_exc()
+        logger.exception("エラーが発生しました")
         return None, "ATIS情報の取得に失敗しました。"
     return atis, None
 
@@ -622,7 +629,7 @@ async def fetch_all_atis(http_session):
     except asyncio.TimeoutError:
         return [], "ATIS情報の取得がタイムアウトしました。"
     except Exception:
-        traceback.print_exc()
+        logger.exception("エラーが発生しました")
         return [], "ATIS情報の取得に失敗しました。"
     return atis_list or [], None
 
@@ -644,7 +651,7 @@ async def fetch_metar(http_session, icao):
     except asyncio.TimeoutError:
         return None, "METAR情報の取得がタイムアウトしました。"
     except Exception:
-        traceback.print_exc()
+        logger.exception("エラーが発生しました")
         return None, "METAR情報の取得に失敗しました。"
     metar = next((w for w in weather_list if w.get("type") == "METAR"), None)
     return metar, None
@@ -683,7 +690,7 @@ async def online_command(interaction: discord.Interaction):
         embed.set_footer(text=f"Total: {len(jp_controllers)} controller(s)")
         await interaction.followup.send(embed=embed)
     except Exception as e:
-        traceback.print_exc()
+        logger.exception("エラーが発生しました")
         await interaction.followup.send("エラーが発生しました。しばらくしてから再度お試しください。")
 
 nickname_group = app_commands.Group(name="nickname", description="CIDニックネーム管理")
@@ -752,7 +759,7 @@ async def sup_command(interaction: discord.Interaction):
         embed.set_footer(text=f"Total: {len(sups)} supervisor(s)")
         await interaction.followup.send(embed=embed)
     except Exception as e:
-        traceback.print_exc()
+        logger.exception("エラーが発生しました")
         await interaction.followup.send("エラーが発生しました。しばらくしてから再度お試しください。")
 
 @bot.tree.command(name="notam", description="空港のNOTAMを表示")
@@ -808,7 +815,7 @@ async def notam_command(interaction: discord.Interaction, icao: str, keyword: st
         view = NotamPaginationView(notams, icao_input, total_count, keyword) if total_pages > 1 else None
         await interaction.followup.send(embed=embed, view=view)
     except Exception:
-        traceback.print_exc()
+        logger.exception("エラーが発生しました")
         await interaction.followup.send("エラーが発生しました。しばらくしてから再度お試しください。")
 
 @bot.tree.command(name="atis", description="空港のATIS情報を表示")
@@ -896,7 +903,7 @@ async def atis_command(interaction: discord.Interaction, icao: str):
         )
         await interaction.followup.send(embed=embed)
     except Exception:
-        traceback.print_exc()
+        logger.exception("エラーが発生しました")
         await interaction.followup.send("エラーが発生しました。しばらくしてから再度お試しください。")
 
 @bot.tree.command(name="metar", description="空港のMETAR情報を表示")
@@ -926,7 +933,7 @@ async def metar_command(interaction: discord.Interaction, icao: str):
         )
         await interaction.followup.send(embed=embed)
     except Exception:
-        traceback.print_exc()
+        logger.exception("エラーが発生しました")
         await interaction.followup.send("エラーが発生しました。しばらくしてから再度お試しください。")
 
 @bot.tree.command(name="traffic", description="指定空港の発着予定トラフィック一覧")
@@ -1020,7 +1027,7 @@ async def traffic_command(interaction: discord.Interaction, icao: str):
         embed.set_footer(text=f"Total: {total} flight(s)")
         await interaction.followup.send(embed=embed)
     except Exception as e:
-        traceback.print_exc()
+        logger.exception("エラーが発生しました")
         await interaction.followup.send("エラーが発生しました。しばらくしてから再度お試しください。")
 
 @bot.tree.command(name="stats", description="日本空域の管制統計を表示")
@@ -1101,7 +1108,7 @@ async def stats_command(interaction: discord.Interaction, days: int = 7, positio
 
         await interaction.followup.send(embed=embed)
     except Exception as e:
-        traceback.print_exc()
+        logger.exception("エラーが発生しました")
         await interaction.followup.send("エラーが発生しました。しばらくしてから再度お試しください。")
 
 # ── MyStats commands ──────────────────────────────────────────────
@@ -1142,7 +1149,7 @@ async def mystats_show(interaction: discord.Interaction):
         embed = build_stats_embed(cid, stats, vatsim_info)
         await interaction.followup.send(embed=embed)
     except Exception as e:
-        traceback.print_exc()
+        logger.exception("エラーが発生しました")
         await interaction.followup.send("エラーが発生しました。しばらくしてから再度お試しください。")
 
 @mystats_group.command(name="user", description="指定CIDの管制統計を表示")
@@ -1159,7 +1166,7 @@ async def mystats_user(interaction: discord.Interaction, cid: int):
         embed = build_stats_embed(cid, stats, vatsim_info)
         await interaction.followup.send(embed=embed)
     except Exception as e:
-        traceback.print_exc()
+        logger.exception("エラーが発生しました")
         await interaction.followup.send("エラーが発生しました。しばらくしてから再度お試しください。")
 
 bot.tree.add_command(mystats_group)
@@ -1169,20 +1176,20 @@ bot.tree.add_command(mystats_group)
 @bot.event
 async def on_ready():
     mode = "notifications + commands" if enable_notifications else "commands only"
-    print(f'Logged in as {bot.user} (mode: {mode})')
+    logger.info('Logged in as %s (mode: %s)', bot.user, mode)
     for attempt in range(3):
         try:
             for guild in bot.guilds:
                 bot.tree.copy_global_to(guild=guild)
                 synced = await bot.tree.sync(guild=guild)
-                print(f'Synced {len(synced)} slash command(s) to {guild.name}')
+                logger.info('Synced %d slash command(s) to %s', len(synced), guild.name)
             bot.tree.clear_commands(guild=None)
             await bot.tree.sync()
-            print('Cleared global commands')
+            logger.info('Cleared global commands')
             break
         except Exception as e:
             wait = 2 ** (attempt + 1)
-            print(f'Failed to sync slash commands (attempt {attempt + 1}/3): {e}')
+            logger.warning('Failed to sync slash commands (attempt %d/3): %s', attempt + 1, e)
             if attempt < 2:
                 await asyncio.sleep(wait)
 
