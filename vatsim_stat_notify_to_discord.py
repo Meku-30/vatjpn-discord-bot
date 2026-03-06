@@ -66,6 +66,16 @@ JAPAN_MAJOR_AIRPORTS = {
     "RJCC": "新千歳",
 }
 
+# ATIS発行空港の緯度（北→南ソート用）
+AIRPORT_LAT = {
+    "RJCC": 42.77, "RJCH": 41.77, "RJSS": 38.14, "RJSN": 37.96,
+    "RJTT": 35.55, "RJAA": 35.76, "RJGG": 34.86, "RJOO": 34.79,
+    "RJOT": 34.76, "RJBE": 34.63, "RJBB": 34.43, "RJOA": 34.44,
+    "RJOM": 33.83, "RJOK": 33.55, "RJFF": 33.59, "RJFO": 33.48,
+    "RJFS": 33.15, "RJFU": 32.92, "RJFT": 32.84, "RJFM": 31.88,
+    "RJFK": 31.80, "ROAH": 26.20, "ROIG": 24.34,
+}
+
 data_filename = config["DATAFILE_CONFIG"]["data_filename"]
 nickname_filename = config.get("DATAFILE_CONFIG", "nickname_filename", fallback="nicknames.json")
 stats_db_filename = config.get("DATAFILE_CONFIG", "stats_db_filename", fallback="stats.db")
@@ -801,6 +811,9 @@ async def atis_command(interaction: discord.Interaction, icao: str):
             if not atis_list:
                 await interaction.followup.send("ATISデータがありません。")
                 return
+
+            # 北→南の順にソート
+            atis_list.sort(key=lambda a: AIRPORT_LAT.get(a.get("icao_code", ""), 0), reverse=True)
 
             # 複数Embedに分割（各Embed 4096文字制限、1メッセージ最大10 Embed）
             embeds = []
