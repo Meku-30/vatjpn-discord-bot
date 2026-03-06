@@ -64,6 +64,7 @@ solo_validation_url = config.get("VATSIM_CONFIG", "solo_validation_url", fallbac
 # ── SWIM API (NOTAM) ─────────────────────────────────────────────
 swim_api_url = os.environ.get("SWIM_API_URL")
 swim_api_token = os.environ.get("SWIM_API_TOKEN")
+pirep_channel_id = int(os.environ.get("PIREP_CHANNEL_ID", 0)) or discord_channel_id
 
 JAPAN_MAJOR_AIRPORTS = {
     "RJTT": "羽田",
@@ -405,7 +406,7 @@ class VATJPNBot(discord.Client):
             if err:
                 logger.warning("PIREP取得エラー: %s", err)
                 return
-            channel = self.get_channel(discord_channel_id)
+            channel = self.get_channel(pirep_channel_id)
             if channel is None:
                 return
 
