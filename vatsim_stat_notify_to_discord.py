@@ -767,11 +767,45 @@ async def notam_command(interaction: discord.Interaction, icao: str, keyword: st
         await interaction.followup.send("エラーが発生しました。しばらくしてから再度お試しください。")
 
 @bot.tree.command(name="atis", description="空港のATIS情報を表示")
-@app_commands.describe(icao="空港のICAOコード（例: RJTT）")
+@app_commands.describe(icao="空港のICAOコード（例: RJTT）または 'japan' で主要空港一括表示")
 async def atis_command(interaction: discord.Interaction, icao: str):
     await interaction.response.defer()
     try:
         icao_input = icao.strip().upper()
+
+        if icao_input == "JAPAN":
+            tasks_list = [fetch_atis(bot.http_session, code) for code in JAPAN_MAJOR_AIRPORTS]
+            results = await asyncio.gather(*tasks_list, return_exceptions=True)
+            lines = []
+            for (code, name), result in zip(JAPAN_MAJOR_AIRPORTS.items(), results):
+                if isinstance(result, Exception):
+                    lines.append(f"**{code}** ({name}): エラー")
+                else:
+                    atis, error = result
+                    if error:
+                        lines.append(f"**{code}** ({name}): {error}")
+                    elif not atis:
+                        lines.append(f"**{code}** ({name}): データなし")
+                    else:
+                        letter = atis.get("atis_letter", "")
+                        content = atis.get("content", "")
+                        if len(content) > 300:
+                            content = content[:297] + "..."
+                        header = f"**{code}** ({name})"
+                        if letter:
+                            header += f" - **{letter}**"
+                        lines.append(f"{header}\n{content}")
+            description = "\n\n".join(lines)
+            if len(description) > 4096:
+                description = description[:4093] + "..."
+            embed = discord.Embed(
+                title="Japan ATIS Summary",
+                color=0x00bfff,
+                description=description,
+            )
+            await interaction.followup.send(embed=embed)
+            return
+
         atis, error = await fetch_atis(bot.http_session, icao_input)
         if error:
             await interaction.followup.send(error)
