@@ -830,28 +830,43 @@ async def atis_command(interaction: discord.Interaction, icao: str):
             # 北→南の順にソート（AIS Japan準拠）
             atis_list.sort(key=lambda a: AIRPORT_ORDER_MAP.get(a.get("icao_code", ""), 999))
 
-            # 複数Embedに分割（各Embed 4096文字制限、1メッセージ最大10 Embed）
+            # エリア別にEmbed分割
+            atis_regions = [
+                ("北海道・東北", "RJCC", "RJSN"),
+                ("関東・甲信越", "RJAA", "RJGG"),
+                ("近畿・中国・四国", "RJOO", "RJOK"),
+                ("九州", "RJFF", "RJFK"),
+                ("沖縄・先島", "ROAH", "ROIG"),
+            ]
+            region_bounds = []
+            for label, start, end in atis_regions:
+                s = AIRPORT_ORDER_MAP.get(start, 0)
+                e = AIRPORT_ORDER_MAP.get(end, 999)
+                region_bounds.append((label, s, e))
+
             embeds = []
-            lines = []
-            current_len = 0
-            for atis in atis_list:
-                icao = atis.get("icao_code", "?")
-                letter = atis.get("atis_letter", "")
-                content = atis.get("content", "")
-                header = f"**{icao}**"
-                if letter:
-                    header += f" - **{letter}**"
-                entry = f"{header}\n{content}"
-                entry_len = len(entry) + 2  # +2 for "\n\n" separator
-                if current_len + entry_len > 4000 and lines:
-                    embeds.append(discord.Embed(color=0x00bfff, description="\n\n".join(lines)))
-                    lines = []
-                    current_len = 0
-                lines.append(entry)
-                current_len += entry_len
-            if lines:
-                embeds.append(discord.Embed(color=0x00bfff, description="\n\n".join(lines)))
-            embeds[0].title = f"Japan ATIS ({len(atis_list)}空港)"
+            for label, s, e in region_bounds:
+                lines = []
+                for atis in atis_list:
+                    idx = AIRPORT_ORDER_MAP.get(atis.get("icao_code", ""), -1)
+                    if s <= idx <= e:
+                        icao = atis.get("icao_code", "?")
+                        letter = atis.get("atis_letter", "")
+                        content = atis.get("content", "")
+                        header = f"**{icao}**"
+                        if letter:
+                            header += f" - **{letter}**"
+                        lines.append(f"{header}\n{content}")
+                if lines:
+                    description = "\n\n".join(lines)
+                    if len(description) > 4096:
+                        description = description[:4093] + "..."
+                    embeds.append(discord.Embed(title=label, color=0x00bfff, description=description))
+
+            if not embeds:
+                await interaction.followup.send("ATISデータがありません。")
+                return
+            embeds[0].title = f"Japan ATIS ({len(atis_list)}空港) — {embeds[0].title}"
             await interaction.followup.send(embeds=embeds[:10])
             return
 
