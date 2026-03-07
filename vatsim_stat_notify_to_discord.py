@@ -711,6 +711,28 @@ async def fetch_metar(http_session, icao):
     metar = next((w for w in weather_list if w.get("type") == "METAR"), None)
     return metar, None
 
+# ── RWY-INFO helper ──────────────────────────────────────────────
+
+async def fetch_runway_info(http_session, icao):
+    """SWIM非公式APIから最新RWY-INFOを取得。Returns (rwy_dict, error_msg)."""
+    if not swim_api_url or not swim_api_token:
+        return None, "RWY-INFO機能を使用するにはSWIM_API_URL/SWIM_API_TOKEN環境変数の設定が必要です。"
+    headers = {"Authorization": f"Bearer {swim_api_token}"}
+    url = f"{swim_api_url}/api/runway-info/{icao.upper()}"
+    try:
+        async with http_session.get(url, headers=headers) as resp:
+            if resp.status == 401 or resp.status == 403:
+                return None, "SWIM APIの認証に失敗しました。トークンを確認してください。"
+            if resp.status != 200:
+                return None, None
+            rwy = await resp.json()
+    except asyncio.TimeoutError:
+        return None, "RWY-INFO情報の取得がタイムアウトしました。"
+    except Exception:
+        logger.exception("エラーが発生しました")
+        return None, "RWY-INFO情報の取得に失敗しました。"
+    return rwy, None
+
 # ── PIREP helper ─────────────────────────────────────────────────
 
 TURBULENCE_MAP = {
@@ -1076,7 +1098,37 @@ async def atis_command(interaction: discord.Interaction, icao: str):
             await interaction.followup.send(error)
             return
         if not atis:
-            await interaction.followup.send(f"**{icao_input}** のATISデータがありません。")
+            metar, rwy = await asyncio.gather(
+                fetch_metar(bot.http_session, icao_input),
+                fetch_runway_info(bot.http_session, icao_input),
+            )
+            metar_data, metar_err = metar
+            rwy_data, rwy_err = rwy
+
+            parts = []
+            if metar_data:
+                parts.append(f"**METAR:**\n{metar_data.get('raw_text', '')}")
+            if rwy_data:
+                apch = rwy_data.get("approach_type")
+                rwy_in_use = rwy_data.get("runway_in_use")
+                if apch:
+                    parts.append(f"**APCH TYPE:** {apch}")
+                if rwy_in_use:
+                    parts.append(f"**USING RWY:** {rwy_in_use}")
+
+            if not parts:
+                await interaction.followup.send(f"**{icao_input}** のATIS・RWY-INFOデータがありません。")
+                return
+
+            description = "\n\n".join(parts)
+            if len(description) > 4096:
+                description = description[:4093] + "..."
+            embed = discord.Embed(
+                title=f"{icao_input} RWY-INFO",
+                color=0x00bfff,
+                description=description,
+            )
+            await interaction.followup.send(embed=embed)
             return
 
         atis_letter = atis.get("atis_letter")
