@@ -584,7 +584,7 @@ class VATJPNBot(discord.Client):
                     logger.warning("RWY-INFO一括取得エラー: %s", err)
                     return
                 for rwy in rwy_list:
-                    icao = rwy.get("icao", "")
+                    icao = rwy.get("icao_code", "") or rwy.get("icao", "")
                     if icao:
                         rwy_cache[icao] = rwy
             else:
