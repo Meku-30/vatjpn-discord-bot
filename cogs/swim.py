@@ -145,6 +145,116 @@ def is_in_time_range(time_start, time_end):
         # 日跨ぎ: 22:00-06:00 → 22:00<=now OR now<06:00
         return now_minutes >= start_minutes or now_minutes < end_minutes
 
+# ── NOTAM helper ──────────────────────────────────────────────────
+
+NOTAM_PER_PAGE = 5
+
+async def fetch_notams(http_session, icao):
+    """SWIM非公式APIから有効なNOTAMを取得。Returns (notams_list, total_count, error_msg)."""
+    data, err = await _swim_request(http_session, "/api/notams/active", "NOTAM", params={"icao": icao.upper()})
+    if err:
+        return [], 0, err
+    return data or [], len(data or []), None
+
+def format_notam_page(notams, page, icao, total_count, keyword=None):
+    """NOTAMリストの指定ページをEmbed形式で生成。"""
+    total_pages = max(1, (len(notams) + NOTAM_PER_PAGE - 1) // NOTAM_PER_PAGE)
+    start = page * NOTAM_PER_PAGE
+    end = start + NOTAM_PER_PAGE
+    page_notams = notams[start:end]
+
+    lines = []
+    for n in page_notams:
+        notam_id = n.get("notam_id", "?")
+        body = n.get("body", "")
+        if len(body) > 200:
+            body = body[:197] + "..."
+        valid_from = (n.get("valid_from") or "")[:16]
+        valid_to = (n.get("valid_to") or "")[:16]
+        period = ""
+        if valid_from or valid_to:
+            period = f"\n  {valid_from} ~ {valid_to}"
+        lines.append(f"**{notam_id}**\n{body}{period}")
+
+    description = "\n\n".join(lines)
+    if len(description) > 4096:
+        description = description[:4093] + "..."
+
+    filter_text = f" (filter: {keyword})" if keyword else ""
+    title = f"{icao} NOTAM ({len(notams)}/{total_count}件){filter_text}"
+    embed = discord.Embed(title=title, color=0xff9900, description=description)
+    embed.set_footer(text=f"Page {page + 1}/{total_pages}")
+    return embed, total_pages
+
+class NotamPaginationView(discord.ui.View):
+    def __init__(self, notams, icao, total_count, keyword=None):
+        super().__init__(timeout=300)
+        self.notams = notams
+        self.icao = icao
+        self.total_count = total_count
+        self.keyword = keyword
+        self.page = 0
+        self.total_pages = max(1, (len(notams) + NOTAM_PER_PAGE - 1) // NOTAM_PER_PAGE)
+        self._update_buttons()
+
+    def _update_buttons(self):
+        self.prev_button.disabled = self.page <= 0
+        self.next_button.disabled = self.page >= self.total_pages - 1
+
+    @discord.ui.button(label="<", style=discord.ButtonStyle.secondary)
+    async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page -= 1
+        self._update_buttons()
+        embed, _ = format_notam_page(self.notams, self.page, self.icao, self.total_count, self.keyword)
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label=">", style=discord.ButtonStyle.secondary)
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page += 1
+        self._update_buttons()
+        embed, _ = format_notam_page(self.notams, self.page, self.icao, self.total_count, self.keyword)
+        await interaction.response.edit_message(embed=embed, view=self)
+
+# ── ATIS helper ───────────────────────────────────────────────────
+
+async def fetch_atis(http_session, icao):
+    """SWIM非公式APIから最新ATISを取得。Returns (atis_dict, error_msg)."""
+    return await _swim_request(http_session, f"/api/atis/{icao.upper()}", "ATIS")
+
+async def fetch_all_atis(http_session):
+    """SWIM非公式APIから全空港ATISを一括取得。Returns (atis_list, error_msg)."""
+    data, err = await _swim_request(http_session, "/api/atis", "ATIS")
+    if err:
+        return [], err
+    return data or [], None
+
+# ── METAR helper ──────────────────────────────────────────────────
+
+async def fetch_metar(http_session, icao):
+    """SWIM非公式APIから最新METARを取得。Returns (metar_dict, error_msg)."""
+    data, err = await _swim_request(http_session, f"/api/weather/{icao.upper()}", "METAR")
+    if err:
+        return None, err
+    metar = next((w for w in (data or []) if w.get("type") == "METAR"), None)
+    return metar, None
+
+# ── RWY-INFO helper ──────────────────────────────────────────────
+
+async def fetch_runway_info(http_session, icao):
+    """SWIM非公式APIから最新RWY-INFOを取得。Returns (rwy_dict, error_msg)."""
+    return await _swim_request(http_session, f"/api/runway-info/{icao.upper()}", "RWY-INFO")
+
+async def fetch_all_runway_info(http_session):
+    """SWIM非公式APIから全空港のRWY-INFOを一括取得。Returns (rwy_list, error_msg)."""
+    data, err = await _swim_request(http_session, "/api/runway-info", "RWY-INFO")
+    if err:
+        return [], err
+    # フィールド名を正規化（bulk APIはicao_codeを使用）
+    for rwy in (data or []):
+        if "icao_code" in rwy and "icao" not in rwy:
+            rwy["icao"] = rwy["icao_code"]
+    return data or [], None
+
 
 class SwimCog(commands.Cog):
     """SWIM非公式API連携機能（ATIS, METAR, NOTAM, PIREP, APCH）"""
