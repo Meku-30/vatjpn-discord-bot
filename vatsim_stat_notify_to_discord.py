@@ -145,6 +145,57 @@ def init_db():
     conn.commit()
     conn.close()
 
+# ── APCH TYPE monitoring helpers ──────────────────────────────────
+
+def apch_set_channel(guild_id, channel_id):
+    with sqlite3.connect(stats_db_filename) as conn:
+        conn.execute("INSERT OR REPLACE INTO apch_config (guild_id, channel_id) VALUES (?, ?)",
+                     (str(guild_id), str(channel_id)))
+
+def apch_get_channel(guild_id):
+    with sqlite3.connect(stats_db_filename) as conn:
+        row = conn.execute("SELECT channel_id FROM apch_config WHERE guild_id = ?",
+                          (str(guild_id),)).fetchone()
+    return int(row[0]) if row else None
+
+def apch_add_watch(guild_id, icao, baseline, time_start, time_end, registered_by):
+    with sqlite3.connect(stats_db_filename) as conn:
+        # 同じguild+icao+時間帯の既存レコードを削除してから挿入（重複防止）
+        conn.execute(
+            "DELETE FROM apch_watches WHERE guild_id = ? AND icao = ? AND time_start IS ? AND time_end IS ?",
+            (str(guild_id), icao.upper(), time_start, time_end))
+        conn.execute(
+            "INSERT INTO apch_watches (guild_id, icao, baseline, time_start, time_end, registered_by) VALUES (?, ?, ?, ?, ?, ?)",
+            (str(guild_id), icao.upper(), baseline, time_start, time_end, str(registered_by)))
+
+def apch_remove_watch(guild_id, icao, time_start=None, time_end=None):
+    """登録を削除。time_start/time_end指定時はその時間帯のみ、未指定時は全削除。削除件数を返す。"""
+    with sqlite3.connect(stats_db_filename) as conn:
+        if time_start is not None and time_end is not None:
+            c = conn.execute(
+                "DELETE FROM apch_watches WHERE guild_id = ? AND icao = ? AND time_start = ? AND time_end = ?",
+                (str(guild_id), icao.upper(), time_start, time_end))
+        else:
+            c = conn.execute(
+                "DELETE FROM apch_watches WHERE guild_id = ? AND icao = ?",
+                (str(guild_id), icao.upper()))
+        return c.rowcount
+
+def apch_list_watches(guild_id):
+    with sqlite3.connect(stats_db_filename) as conn:
+        rows = conn.execute(
+            "SELECT icao, baseline, time_start, time_end FROM apch_watches WHERE guild_id = ? ORDER BY icao, time_start",
+            (str(guild_id),)).fetchall()
+    return rows
+
+def apch_get_all_watches():
+    """全ギルドの監視設定を取得（ポーリング用）。"""
+    with sqlite3.connect(stats_db_filename) as conn:
+        rows = conn.execute(
+            "SELECT guild_id, icao, baseline, time_start, time_end FROM apch_watches ORDER BY guild_id, icao"
+        ).fetchall()
+    return rows
+
 def log_session(atc_info):
     logon_time_str = atc_info.get("logon_time", "")
     logoff_time = datetime.now(timezone.utc)
