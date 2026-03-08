@@ -196,6 +196,27 @@ def apch_get_all_watches():
         ).fetchall()
     return rows
 
+def parse_time_range(time_range_str):
+    """'HH:MM-HH:MM' をパースして (start, end) を返す。不正な場合は None。"""
+    m = re.match(r'^(\d{2}:\d{2})-(\d{2}:\d{2})$', time_range_str)
+    if not m:
+        return None
+    return m.group(1), m.group(2)
+
+def is_in_time_range(time_start, time_end):
+    """現在UTC時刻が time_start〜time_end の範囲内かを判定する。日跨ぎ対応。"""
+    now = datetime.now(timezone.utc)
+    now_minutes = now.hour * 60 + now.minute
+    sh, sm = map(int, time_start.split(":"))
+    eh, em = map(int, time_end.split(":"))
+    start_minutes = sh * 60 + sm
+    end_minutes = eh * 60 + em
+    if start_minutes <= end_minutes:
+        return start_minutes <= now_minutes < end_minutes
+    else:
+        # 日跨ぎ: 22:00-06:00 → 22:00<=now OR now<06:00
+        return now_minutes >= start_minutes or now_minutes < end_minutes
+
 def log_session(atc_info):
     logon_time_str = atc_info.get("logon_time", "")
     logoff_time = datetime.now(timezone.utc)
