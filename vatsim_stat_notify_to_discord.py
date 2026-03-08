@@ -1894,4 +1894,5 @@ async def on_ready():
             if attempt < 2:
                 await asyncio.sleep(wait)
 
-bot.run(discord_bot_client_token)
+if __name__ == "__main__":
+    bot.run(discord_bot_client_token)
