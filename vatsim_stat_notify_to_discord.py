@@ -549,6 +549,10 @@ class VATJPNBot(discord.Client):
             if not all_watches:
                 return
 
+            # 削除済みwatchのキャッシュをクリーンアップ
+            active_keys = {(row[0], row[1], row[3], row[4]) for row in all_watches}
+            self.apch_last_notified = {k: v for k, v in self.apch_last_notified.items() if k in active_keys}
+
             # guild_id × icao でグルーピング（APIコール数を最小化）
             icao_set = {row[1] for row in all_watches}
             rwy_cache = {}
@@ -566,7 +570,7 @@ class VATJPNBot(discord.Client):
                 for guild_id, icao, baseline, ts, te in all_watches:
                     if icao in rwy_cache:
                         apch = rwy_cache[icao].get("approach_type", "")
-                        key = (guild_id, icao)
+                        key = (guild_id, icao, ts, te)
                         if apch and not self._apch_matches_baseline(apch, baseline):
                             self.apch_last_notified[key] = apch
                 logger.info("APCH TYPE監視開始（%d空港）", len(icao_set))
@@ -582,7 +586,7 @@ class VATJPNBot(discord.Client):
                 apch = rwy_cache[icao].get("approach_type", "")
                 if not apch:
                     continue
-                key = (guild_id, icao)
+                key = (guild_id, icao, ts, te)
                 if self._apch_matches_baseline(apch, baseline):
                     # 基準に戻った → 通知済みをクリア
                     self.apch_last_notified.pop(key, None)
@@ -625,6 +629,7 @@ class VATJPNBot(discord.Client):
     @apch_loop.before_loop
     async def before_apch_loop(self):
         await self.wait_until_ready()
+        await asyncio.sleep(30)  # PIREP loopとのAPI同時アクセスを避ける
 
 bot = VATJPNBot()
 
