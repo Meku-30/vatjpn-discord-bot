@@ -17,5 +17,6 @@ stats_db_filename=stats.db
 #   SWIM_API_URL=your_swim_api_url
 #   SWIM_API_TOKEN=your_bearer_token
 #   ENABLE_PIREP_NOTIFICATIONS=true  (PIREP turbulence auto-notification, default: true)
+#   ENABLE_APCH_NOTIFICATIONS=true   (APCH TYPE change auto-notification, default: true)
 #   PIREP_CHANNEL_ID=123456789       (PIREP notification channel, default: discord_channel_id)
 #   ENABLE_NOTIFICATIONS=true        (login/logout notifications, false = commands-only mode)
