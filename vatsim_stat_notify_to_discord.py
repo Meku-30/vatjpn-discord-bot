@@ -454,6 +454,8 @@ class VATJPNBot(discord.Client):
         self.http_session = None
         self.pirep_notified = set()  # 通知済みPIREPのcontrol_number
         self._pirep_first_run = True
+        self.apch_last_notified = {}  # (guild_id, icao) → 前回通知した approach_type
+        self._apch_first_run = True
 
     async def setup_hook(self):
         timeout = aiohttp.ClientTimeout(total=10)
@@ -462,12 +464,16 @@ class VATJPNBot(discord.Client):
             self.polling_loop.start()
             if enable_pirep_notifications and swim_api_url and swim_api_token:
                 self.pirep_loop.start()
+            if swim_api_url and swim_api_token:
+                self.apch_loop.start()
 
     async def close(self):
         if enable_notifications:
             self.polling_loop.cancel()
             if enable_pirep_notifications and self.pirep_loop.is_running():
                 self.pirep_loop.cancel()
+            if self.apch_loop.is_running():
+                self.apch_loop.cancel()
         if self.http_session:
             await self.http_session.close()
         await super().close()
@@ -534,6 +540,90 @@ class VATJPNBot(discord.Client):
 
     @pirep_loop.before_loop
     async def before_pirep_loop(self):
+        await self.wait_until_ready()
+
+    @tasks.loop(seconds=300)
+    async def apch_loop(self):
+        try:
+            all_watches = apch_get_all_watches()
+            if not all_watches:
+                return
+
+            # guild_id × icao でグルーピング（APIコール数を最小化）
+            icao_set = {row[1] for row in all_watches}
+            rwy_cache = {}
+            for icao in icao_set:
+                rwy_data, err = await fetch_runway_info(self.http_session, icao)
+                if err:
+                    logger.warning("RWY-INFO取得エラー (%s): %s", icao, err)
+                    continue
+                if rwy_data:
+                    rwy_cache[icao] = rwy_data
+
+            if self._apch_first_run:
+                # 初回: 現在のAPCH TYPEをキャッシュ（通知しない）
+                self._apch_first_run = False
+                for guild_id, icao, baseline, ts, te in all_watches:
+                    if icao in rwy_cache:
+                        apch = rwy_cache[icao].get("approach_type", "")
+                        key = (guild_id, icao)
+                        if apch and not self._apch_matches_baseline(apch, baseline):
+                            self.apch_last_notified[key] = apch
+                logger.info("APCH TYPE監視開始（%d空港）", len(icao_set))
+                return
+
+            # 通常ポーリング
+            for guild_id, icao, baseline, ts, te in all_watches:
+                if icao not in rwy_cache:
+                    continue
+                # 時間帯チェック
+                if ts and te and not is_in_time_range(ts, te):
+                    continue
+                apch = rwy_cache[icao].get("approach_type", "")
+                if not apch:
+                    continue
+                key = (guild_id, icao)
+                if self._apch_matches_baseline(apch, baseline):
+                    # 基準に戻った → 通知済みをクリア
+                    self.apch_last_notified.pop(key, None)
+                    continue
+                # 基準と異なる
+                if self.apch_last_notified.get(key) == apch:
+                    continue  # 既に通知済み
+                self.apch_last_notified[key] = apch
+
+                ch_id = apch_get_channel(guild_id)
+                if not ch_id:
+                    continue
+                channel = self.get_channel(ch_id)
+                if not channel:
+                    continue
+
+                rwy_in_use = rwy_cache[icao].get("runway_in_use", "")
+                observed = rwy_cache[icao].get("observed_at", "")
+                time_desc = f" ({ts}-{te} UTC)" if ts else ""
+                embed = discord.Embed(
+                    title=f"⚠️ APCH TYPE 変更 — {icao}",
+                    color=0xFF9900,
+                )
+                embed.add_field(name="現在", value=apch, inline=True)
+                embed.add_field(name="基準", value=f"{baseline}{time_desc}", inline=True)
+                if rwy_in_use:
+                    embed.add_field(name="使用滑走路", value=rwy_in_use, inline=True)
+                if observed:
+                    embed.set_footer(text=f"観測: {observed[:10]} {observed[11:16]}Z")
+                await channel.send(embed=embed)
+
+        except Exception:
+            logger.exception("APCHポーリングエラー")
+
+    @staticmethod
+    def _apch_matches_baseline(approach_type, baseline):
+        """approach_typeがbaselineに合致するかを部分一致で判定する。"""
+        return baseline.upper() in approach_type.upper()
+
+    @apch_loop.before_loop
+    async def before_apch_loop(self):
         await self.wait_until_ready()
 
 bot = VATJPNBot()
