@@ -468,16 +468,16 @@ class VATJPNBot(discord.Client):
             self.polling_loop.start()
             if enable_pirep_notifications and swim_api_url and swim_api_token:
                 self.pirep_loop.start()
-            if swim_api_url and swim_api_token:
-                self.apch_loop.start()
+        if swim_api_url and swim_api_token:
+            self.apch_loop.start()
 
     async def close(self):
         if enable_notifications:
             self.polling_loop.cancel()
             if enable_pirep_notifications and self.pirep_loop.is_running():
                 self.pirep_loop.cancel()
-            if self.apch_loop.is_running():
-                self.apch_loop.cancel()
+        if self.apch_loop.is_running():
+            self.apch_loop.cancel()
         if self.http_session:
             await self.http_session.close()
         await super().close()
