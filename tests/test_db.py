@@ -4,14 +4,16 @@ conftest.py が一時ディレクトリに stats.db を作成するため、
 テストごとに独立したDB状態で検証できる。
 """
 from vatsim_stat_notify_to_discord import (
+    log_session,
+    get_controller_stats,
+)
+from cogs.swim import (
     apch_set_channel,
     apch_get_channel,
     apch_add_watch,
     apch_remove_watch,
     apch_list_watches,
     apch_get_all_watches,
-    log_session,
-    get_controller_stats,
 )
 
 
