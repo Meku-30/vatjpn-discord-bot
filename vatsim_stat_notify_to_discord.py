@@ -1633,7 +1633,7 @@ bot.tree.add_command(mystats_group)
 
 # ── /apch command group ───────────────────────────────────────────
 
-apch_group = app_commands.Group(name="apch", description="APCH TYPE変更監視")
+apch_group = app_commands.Group(name="apch", description="APCH TYPE変更監視", guild_only=True)
 
 @apch_group.command(name="setchannel", description="APCH TYPE変更通知の送信先チャンネルを設定")
 @app_commands.describe(channel="通知先チャンネル")
