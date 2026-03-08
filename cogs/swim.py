@@ -9,7 +9,7 @@ import logging
 import io
 from datetime import datetime, timezone
 from staticmap import StaticMap, CircleMarker
-from vatsim_stat_notify_to_discord import get_db
+from vatsim_stat_notify_to_discord import get_db, pirep_channel_id
 
 logger = logging.getLogger("vatjpn-bot")
 
@@ -796,11 +796,48 @@ class SwimCog(commands.Cog):
         )
         await interaction.response.send_message(embed=embed)
 
-    # ── ループの仮定義（後のタスクで中身を移動） ──
+    # ── ループ ──
 
     @tasks.loop(seconds=300)
     async def pirep_loop(self):
-        pass
+        try:
+            pireps, err = await fetch_active_pireps(self.bot.http_session)
+            if err:
+                logger.warning("PIREP取得エラー: %s", err)
+                return
+            channel = self.bot.get_channel(pirep_channel_id)
+            if channel is None:
+                return
+
+            # MOD以上 (strength >= 4) を抽出（数値・テキスト両対応）
+            mod_plus = [
+                p for p in pireps
+                if (turbulence_level(p.get("turbulence_strength", "")) or 0) >= 4
+            ]
+
+            # 有効なPIREPのcontrol_number一覧（期限切れを自動クリア用）
+            active_ids = {p["control_number"] for p in pireps}
+            self.pirep_notified &= active_ids
+
+            if self._pirep_first_run:
+                # 初回: 既存PIREPを全て通知済みに登録（通知はスキップ）
+                self._pirep_first_run = False
+                for p in mod_plus:
+                    self.pirep_notified.add(p["control_number"])
+                logger.info("PIREP監視開始（既存MOD+: %d件をスキップ）", len(mod_plus))
+                return
+
+            # 通常: 新規PIREPのみ通知
+            for p in mod_plus:
+                cn = p["control_number"]
+                if cn in self.pirep_notified:
+                    continue
+                self.pirep_notified.add(cn)
+                embed, map_file = await build_pirep_embed(p)
+                await channel.send(embed=embed, file=map_file) if map_file else await channel.send(embed=embed)
+
+        except Exception:
+            logger.exception("PIREPポーリングエラー")
 
     @pirep_loop.before_loop
     async def before_pirep_loop(self):
@@ -808,12 +845,175 @@ class SwimCog(commands.Cog):
 
     @tasks.loop(seconds=300)
     async def apch_loop(self):
-        pass
+        try:
+            all_watches = apch_get_all_watches()
+            if not all_watches:
+                return
+
+            # グローバルwatch (icao="*") の有無と、空港別baseline登録を分類
+            guilds_with_global = set()
+            guild_watches = {}  # guild_id → {icao: [(baseline, ts, te), ...]}
+            guild_channels = {}  # guild_id → channel_id
+            for guild_id, icao, baseline, ts, te, channel_id in all_watches:
+                if channel_id:
+                    guild_channels[guild_id] = int(channel_id)
+                if icao == "*":
+                    guilds_with_global.add(guild_id)
+                else:
+                    guild_watches.setdefault(guild_id, {}).setdefault(icao, []).append((baseline, ts, te))
+
+            # キャッシュクリーンアップ
+            active_specific_keys = set()
+            for gid, airports in guild_watches.items():
+                for icao in airports:
+                    active_specific_keys.add((gid, icao))
+            self.apch_last_notified = {
+                k: v for k, v in self.apch_last_notified.items()
+                if k in active_specific_keys or k[0] in guilds_with_global
+            }
+
+            # RWY-INFO取得: グローバルwatchがあれば一括取得、なければ個別取得
+            specific_icaos = set()
+            for airports in guild_watches.values():
+                specific_icaos.update(airports.keys())
+
+            rwy_cache = {}
+            if guilds_with_global:
+                rwy_list, err = await fetch_all_runway_info(self.bot.http_session)
+                if err:
+                    logger.warning("RWY-INFO一括取得エラー: %s", err)
+                    return
+                for rwy in rwy_list:
+                    icao = rwy.get("icao", "")
+                    if icao:
+                        rwy_cache[icao] = rwy
+            else:
+                for icao in specific_icaos:
+                    rwy_data, err = await fetch_runway_info(self.bot.http_session, icao)
+                    if err:
+                        logger.warning("RWY-INFO取得エラー (%s): %s", icao, err)
+                        continue
+                    if rwy_data:
+                        rwy_cache[icao] = rwy_data
+
+            if self._apch_first_run:
+                self._apch_first_run = False
+                for icao, rwy in rwy_cache.items():
+                    apch = rwy.get("approach_type", "")
+                    if not apch:
+                        continue
+                    for gid in guilds_with_global:
+                        self.apch_last_notified[(gid, icao)] = apch
+                    for gid, airports in guild_watches.items():
+                        if icao in airports:
+                            self.apch_last_notified[(gid, icao)] = apch
+                logger.info("APCH TYPE監視開始（%d空港）", len(rwy_cache))
+                return
+
+            # 通常ポーリング: 各空港 × 各ギルド を処理
+            all_guild_ids = set(guild_watches.keys()) | guilds_with_global
+            for icao, rwy in rwy_cache.items():
+                apch = rwy.get("approach_type", "")
+                if not apch:
+                    continue
+                rwy_in_use = rwy.get("runway_in_use", "")
+                observed = rwy.get("observed_at", "")
+
+                for guild_id in all_guild_ids:
+                    has_specific = guild_id in guild_watches and icao in guild_watches[guild_id]
+                    has_global = guild_id in guilds_with_global
+                    if not has_specific and not has_global:
+                        continue
+
+                    key = (guild_id, icao)
+
+                    if has_specific:
+                        # 基準登録あり: 適用時間帯のbaselineをOR判定
+                        applicable = []
+                        for bl, ts, te in guild_watches[guild_id][icao]:
+                            if ts and te and not is_in_time_range(ts, te):
+                                continue
+                            applicable.append((bl, ts, te))
+
+                        if applicable:
+                            if any(self._apch_matches_baseline(apch, bl) for bl, _, _ in applicable):
+                                self.apch_last_notified.pop(key, None)
+                                continue
+                            # どのbaselineにも一致しない → 通知
+                            if self.apch_last_notified.get(key) == apch:
+                                continue
+                            prev_apch = self.apch_last_notified.get(key, "")
+                            self.apch_last_notified[key] = apch
+
+                            ch_id = guild_channels.get(guild_id)
+                            if not ch_id:
+                                continue
+                            channel = self.bot.get_channel(ch_id)
+                            if not channel:
+                                continue
+
+                            bl_strs = []
+                            for bl, ts, te in applicable:
+                                td = f" ({ts}-{te} UTC)" if ts else ""
+                                bl_strs.append(f"{bl}{td}")
+                            embed = discord.Embed(
+                                title=f"⚠️ APCH TYPE 変更 — {icao}",
+                                color=0xFF9900,
+                            )
+                            embed.add_field(name="現在", value=apch, inline=True)
+                            embed.add_field(name="基準", value=" / ".join(bl_strs), inline=True)
+                            if rwy_in_use:
+                                embed.add_field(name="使用滑走路", value=rwy_in_use, inline=True)
+                            if observed:
+                                embed.set_footer(text=f"観測: {observed[:10]} {observed[11:16]}Z")
+                            await channel.send(embed=embed)
+                            continue  # baseline処理済み
+                        # 全baselineが時間帯外 → グローバルwatchにフォールバック
+                        if not has_global:
+                            continue
+                    if has_global:
+                        # グローバルwatch: 変化検知のみ
+                        if self.apch_last_notified.get(key) == apch:
+                            continue
+                        prev_apch = self.apch_last_notified.get(key, "")
+                        self.apch_last_notified[key] = apch
+                        if not prev_apch:
+                            continue  # 初回観測はキャッシュのみ
+
+                        ch_id = guild_channels.get(guild_id)
+                        if not ch_id:
+                            continue
+                        channel = self.bot.get_channel(ch_id)
+                        if not channel:
+                            continue
+
+                        embed = discord.Embed(
+                            title=f"APCH TYPE 更新 — {icao}",
+                            color=0x3498DB,
+                        )
+                        embed.add_field(name="現在", value=apch, inline=True)
+                        if prev_apch:
+                            embed.add_field(name="前回", value=prev_apch, inline=True)
+                        if rwy_in_use:
+                            embed.add_field(name="使用滑走路", value=rwy_in_use, inline=True)
+                        if observed:
+                            embed.set_footer(text=f"観測: {observed[:10]} {observed[11:16]}Z")
+                        await channel.send(embed=embed)
+
+        except Exception:
+            logger.exception("APCHポーリングエラー")
+
+    @staticmethod
+    def _apch_matches_baseline(approach_type, baseline):
+        """approach_typeがbaselineに合致するかを部分一致で判定する。'*'は全変化監視（常に不一致）。"""
+        if baseline == "*":
+            return False
+        return baseline.upper() in approach_type.upper()
 
     @apch_loop.before_loop
     async def before_apch_loop(self):
         await self.bot.wait_until_ready()
-        await asyncio.sleep(30)
+        await asyncio.sleep(30)  # PIREP loopとのAPI同時アクセスを避ける
 
 
 async def setup(bot):
