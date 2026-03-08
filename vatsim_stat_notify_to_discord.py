@@ -1536,6 +1536,82 @@ async def mystats_user(interaction: discord.Interaction, cid: int):
 
 bot.tree.add_command(mystats_group)
 
+# ── /apch command group ───────────────────────────────────────────
+
+apch_group = app_commands.Group(name="apch", description="APCH TYPE変更監視")
+
+@apch_group.command(name="setchannel", description="APCH TYPE変更通知の送信先チャンネルを設定")
+@app_commands.describe(channel="通知先チャンネル")
+async def apch_setchannel(interaction: discord.Interaction, channel: discord.TextChannel):
+    apch_set_channel(interaction.guild_id, channel.id)
+    await interaction.response.send_message(f"APCH TYPE変更通知の送信先を {channel.mention} に設定しました。")
+
+@apch_group.command(name="set", description="空港の基準APCH TYPEを登録")
+@app_commands.describe(
+    icao="空港のICAOコード（例: RJTT）",
+    baseline="基準APCH TYPE（例: ILS, ILS Y RWY34L）",
+    time_range="適用時間帯 HH:MM-HH:MM UTC（省略時は全時間帯）"
+)
+async def apch_set(interaction: discord.Interaction, icao: str, baseline: str, time_range: str = None):
+    if not apch_get_channel(interaction.guild_id):
+        await interaction.response.send_message(
+            "先に `/apch setchannel` で通知先チャンネルを設定してください。", ephemeral=True)
+        return
+    time_start, time_end = None, None
+    if time_range:
+        parsed = parse_time_range(time_range)
+        if not parsed:
+            await interaction.response.send_message(
+                "時間帯の形式が不正です。`HH:MM-HH:MM`（UTC）で指定してください。例: `22:00-06:00`", ephemeral=True)
+            return
+        time_start, time_end = parsed
+    apch_add_watch(interaction.guild_id, icao, baseline, time_start, time_end, interaction.user.id)
+    time_desc = f" ({time_start}-{time_end} UTC)" if time_start else " (全時間帯)"
+    await interaction.response.send_message(
+        f"**{icao.upper()}** の基準APCH TYPEを「{baseline}」に設定しました。{time_desc}")
+
+@apch_group.command(name="remove", description="空港のAPCH TYPE監視登録を削除")
+@app_commands.describe(
+    icao="空港のICAOコード（例: RJTT）",
+    time_range="削除する時間帯 HH:MM-HH:MM UTC（省略時は全削除）"
+)
+async def apch_remove(interaction: discord.Interaction, icao: str, time_range: str = None):
+    time_start, time_end = None, None
+    if time_range:
+        parsed = parse_time_range(time_range)
+        if not parsed:
+            await interaction.response.send_message(
+                "時間帯の形式が不正です。`HH:MM-HH:MM`（UTC）で指定してください。", ephemeral=True)
+            return
+        time_start, time_end = parsed
+    count = apch_remove_watch(interaction.guild_id, icao, time_start, time_end)
+    if count > 0:
+        await interaction.response.send_message(f"**{icao.upper()}** の監視登録を{count}件削除しました。")
+    else:
+        await interaction.response.send_message(f"**{icao.upper()}** の該当する監視登録が見つかりません。")
+
+@apch_group.command(name="list", description="APCH TYPE監視の登録一覧を表示")
+async def apch_list(interaction: discord.Interaction):
+    watches = apch_list_watches(interaction.guild_id)
+    ch_id = apch_get_channel(interaction.guild_id)
+    if not watches and not ch_id:
+        await interaction.response.send_message("APCH TYPE監視は設定されていません。")
+        return
+    lines = []
+    for icao, baseline, ts, te in watches:
+        time_desc = f"({ts}-{te} UTC)" if ts else "(全時間帯)"
+        lines.append(f"**{icao}**: \"{baseline}\" {time_desc}")
+    if ch_id:
+        lines.append(f"\n通知先: <#{ch_id}>")
+    embed = discord.Embed(
+        title="APCH TYPE 監視一覧",
+        color=0xFF9900,
+        description="\n".join(lines) if lines else "登録なし"
+    )
+    await interaction.response.send_message(embed=embed)
+
+bot.tree.add_command(apch_group)
+
 # ── Events ─────────────────────────────────────────────────────────
 
 @bot.event
