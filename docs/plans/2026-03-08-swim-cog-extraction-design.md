@@ -7,7 +7,7 @@ SWIM非公式API関連の全機能（コマンド・自動通知ループ・ヘ�
 ## アーキテクチャ
 
 ```
-vatsim_stat_notify_to_discord.py  (メイン, ~1100行)
+vatsim_stat_notify_to_discord.py  (メイン, ~920行)
 ├── 設定・初期化・DB (init_db, get_db)
 ├── VATJPNBot クラス (ポーリングループのみ)
 ├── VATSIM APIヘルパー (get_new, get_controllers, キャッシュ)
@@ -17,7 +17,7 @@ vatsim_stat_notify_to_discord.py  (メイン, ~1100行)
 └── setup_hook で SwimCog を条件付きロード
 
 cogs/
-└── swim.py  (SwimCog, ~800行)
+└── swim.py  (SwimCog, ~1020行)
     ├── SWIM API共通ヘルパー (_swim_request, _get_swim_headers)
     ├── APCH DB関数 (apch_set_channel, apch_add_watch 等)
     ├── 時間帯判定 (parse_time_range, is_in_time_range)
@@ -77,8 +77,7 @@ SWIM環境変数未設定時:
 ### Cogからメインを参照するもの
 
 - `get_db()` — DB接続の取得
-- `swim_api_url`, `swim_api_token` — 環境変数
-- `JAPAN_MAJOR_AIRPORTS`, `AIRPORT_ORDER` — 定数
+- `pirep_channel_id` — PIREP通知先チャンネルID
 
 ## データベース
 
