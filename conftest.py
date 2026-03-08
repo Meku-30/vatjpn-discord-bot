@@ -31,6 +31,7 @@ with open(os.path.join(_test_dir, "data.json"), "w") as f:
 os.environ.setdefault("DISCORD_BOT_TOKEN", "test-token-for-pytest")
 os.environ["ENABLE_NOTIFICATIONS"] = "false"
 os.environ["ENABLE_PIREP_NOTIFICATIONS"] = "false"
+os.environ["ENABLE_APCH_NOTIFICATIONS"] = "false"
 
 # モジュールが settings.ini を CWD から読むため、一時ディレクトリに移動
 _original_cwd = os.getcwd()
