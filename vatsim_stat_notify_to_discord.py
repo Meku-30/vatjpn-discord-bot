@@ -1,6 +1,6 @@
 import discord
 from discord import app_commands
-from discord.ext import tasks
+from discord.ext import commands, tasks
 import aiohttp
 import asyncio
 import json
@@ -348,11 +348,10 @@ async def check_solo_registration(http_session, callsign, cid, current_list=None
 
 # ── Bot class ──────────────────────────────────────────────────────
 
-class VATJPNBot(discord.Client):
+class VATJPNBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
-        super().__init__(intents=intents)
-        self.tree = app_commands.CommandTree(self)
+        super().__init__(command_prefix="!", intents=intents)
         self.http_session = None
         # VATSIMデータキャッシュ（ポーリングで取得したデータをコマンドから再利用）
         self._vatsim_cache = {}  # 最新のcontrollers_map
@@ -372,9 +371,9 @@ class VATJPNBot(discord.Client):
     async def close(self):
         if enable_notifications:
             self.polling_loop.cancel()
+        await super().close()
         if self.http_session:
             await self.http_session.close()
-        await super().close()
 
     @tasks.loop(seconds=vatsim_stat_retrieve_period)
     async def polling_loop(self):
