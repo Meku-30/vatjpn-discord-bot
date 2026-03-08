@@ -3,18 +3,20 @@ from unittest.mock import patch
 from datetime import datetime, timezone
 
 from vatsim_stat_notify_to_discord import (
-    parse_time_range,
-    is_in_time_range,
     format_duration_seconds,
     get_rating_str,
     check_position_rating,
+)
+from cogs.swim import (
+    parse_time_range,
+    is_in_time_range,
     turbulence_level,
     _fl_to_display,
     format_pirep_altitude,
     format_pirep_location,
     parse_pirep_coords,
+    SwimCog,
 )
-from vatsim_stat_notify_to_discord import VATJPNBot
 
 
 # ── parse_time_range ─────────────────────────────────────────────
@@ -46,48 +48,48 @@ def _mock_utc(hour, minute=0):
 
 class TestIsInTimeRange:
     def test_normal_range_inside(self):
-        with patch("vatsim_stat_notify_to_discord.datetime") as mock_dt:
+        with patch("cogs.swim.datetime") as mock_dt:
             mock_dt.now.return_value = _mock_utc(10, 30)
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             assert is_in_time_range("09:00", "12:00") is True
 
     def test_normal_range_outside(self):
-        with patch("vatsim_stat_notify_to_discord.datetime") as mock_dt:
+        with patch("cogs.swim.datetime") as mock_dt:
             mock_dt.now.return_value = _mock_utc(13, 0)
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             assert is_in_time_range("09:00", "12:00") is False
 
     def test_overnight_range_late_night(self):
         """22:00-06:00 の範囲、23:00 → 範囲内"""
-        with patch("vatsim_stat_notify_to_discord.datetime") as mock_dt:
+        with patch("cogs.swim.datetime") as mock_dt:
             mock_dt.now.return_value = _mock_utc(23, 0)
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             assert is_in_time_range("22:00", "06:00") is True
 
     def test_overnight_range_early_morning(self):
         """22:00-06:00 の範囲、03:00 → 範囲内"""
-        with patch("vatsim_stat_notify_to_discord.datetime") as mock_dt:
+        with patch("cogs.swim.datetime") as mock_dt:
             mock_dt.now.return_value = _mock_utc(3, 0)
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             assert is_in_time_range("22:00", "06:00") is True
 
     def test_overnight_range_daytime(self):
         """22:00-06:00 の範囲、12:00 → 範囲外"""
-        with patch("vatsim_stat_notify_to_discord.datetime") as mock_dt:
+        with patch("cogs.swim.datetime") as mock_dt:
             mock_dt.now.return_value = _mock_utc(12, 0)
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             assert is_in_time_range("22:00", "06:00") is False
 
     def test_boundary_start(self):
         """境界: ちょうどstart時刻 → 範囲内"""
-        with patch("vatsim_stat_notify_to_discord.datetime") as mock_dt:
+        with patch("cogs.swim.datetime") as mock_dt:
             mock_dt.now.return_value = _mock_utc(9, 0)
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             assert is_in_time_range("09:00", "12:00") is True
 
     def test_boundary_end(self):
         """境界: ちょうどend時刻 → 範囲外 (end exclusive)"""
-        with patch("vatsim_stat_notify_to_discord.datetime") as mock_dt:
+        with patch("cogs.swim.datetime") as mock_dt:
             mock_dt.now.return_value = _mock_utc(12, 0)
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             assert is_in_time_range("09:00", "12:00") is False
@@ -239,18 +241,18 @@ class TestParsePirepCoords:
 
 class TestApchMatchesBaseline:
     def test_partial_match(self):
-        assert VATJPNBot._apch_matches_baseline("ILS Y RWY34L", "ILS") is True
+        assert SwimCog._apch_matches_baseline("ILS Y RWY34L", "ILS") is True
 
     def test_no_match(self):
-        assert VATJPNBot._apch_matches_baseline("RNAV RWY22", "ILS") is False
+        assert SwimCog._apch_matches_baseline("RNAV RWY22", "ILS") is False
 
     def test_case_insensitive(self):
-        assert VATJPNBot._apch_matches_baseline("ils y rwy34l", "ILS") is True
+        assert SwimCog._apch_matches_baseline("ils y rwy34l", "ILS") is True
 
     def test_exact_match(self):
-        assert VATJPNBot._apch_matches_baseline("ILS Y RWY34L", "ILS Y RWY34L") is True
+        assert SwimCog._apch_matches_baseline("ILS Y RWY34L", "ILS Y RWY34L") is True
 
     def test_wildcard_always_false(self):
         """watchモード ('*') は常にFalse（全変化を通知）"""
-        assert VATJPNBot._apch_matches_baseline("ILS Y RWY34L", "*") is False
-        assert VATJPNBot._apch_matches_baseline("RNAV RWY22", "*") is False
+        assert SwimCog._apch_matches_baseline("ILS Y RWY34L", "*") is False
+        assert SwimCog._apch_matches_baseline("RNAV RWY22", "*") is False

@@ -73,6 +73,9 @@ ENABLE_PIREP_NOTIFICATIONS=true
 # PIREP 通知先チャンネルID（省略時は discord_channel_id と同じ）
 PIREP_CHANNEL_ID=YOUR_PIREP_CHANNEL_ID
 
+# APCH TYPE 変更自動通知（デフォルト: true）
+ENABLE_APCH_NOTIFICATIONS=true
+
 # ログイン/ログアウト通知の有効化（デフォルト: true、false でコマンド専用モード）
 ENABLE_NOTIFICATIONS=true
 ```
@@ -104,6 +107,7 @@ services:
   discord-bot:
     build: .
     volumes:
+      - ./cogs/:/app/cogs/:ro
       - ./vatsim_stat_notify_to_discord.py:/app/vatsim_stat_notify_to_discord.py:ro
       - ./settings.ini:/app/settings.ini:ro
       - ./data.json:/app/data.json
@@ -115,6 +119,7 @@ services:
       - SWIM_API_TOKEN=${SWIM_API_TOKEN}
       - ENABLE_NOTIFICATIONS=${ENABLE_NOTIFICATIONS:-true}
       - ENABLE_PIREP_NOTIFICATIONS=${ENABLE_PIREP_NOTIFICATIONS:-true}
+      - ENABLE_APCH_NOTIFICATIONS=${ENABLE_APCH_NOTIFICATIONS:-true}
       - PIREP_CHANNEL_ID=${PIREP_CHANNEL_ID:-}
     restart: always
 ```
