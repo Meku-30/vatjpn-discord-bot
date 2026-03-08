@@ -584,7 +584,7 @@ class VATJPNBot(discord.Client):
                     logger.warning("RWY-INFO一括取得エラー: %s", err)
                     return
                 for rwy in rwy_list:
-                    icao = rwy.get("icao_code", "") or rwy.get("icao", "")
+                    icao = rwy.get("icao", "")
                     if icao:
                         rwy_cache[icao] = rwy
             else:
@@ -634,41 +634,44 @@ class VATJPNBot(discord.Client):
                             if ts and te and not is_in_time_range(ts, te):
                                 continue
                             applicable.append((bl, ts, te))
-                        if not applicable:
-                            continue  # 全baseline が時間帯外 → スキップ
 
-                        if any(self._apch_matches_baseline(apch, bl) for bl, _, _ in applicable):
-                            self.apch_last_notified.pop(key, None)
-                            continue
-                        # どのbaselineにも一致しない → 通知
-                        if self.apch_last_notified.get(key) == apch:
-                            continue
-                        prev_apch = self.apch_last_notified.get(key, "")
-                        self.apch_last_notified[key] = apch
+                        if applicable:
+                            if any(self._apch_matches_baseline(apch, bl) for bl, _, _ in applicable):
+                                self.apch_last_notified.pop(key, None)
+                                continue
+                            # どのbaselineにも一致しない → 通知
+                            if self.apch_last_notified.get(key) == apch:
+                                continue
+                            prev_apch = self.apch_last_notified.get(key, "")
+                            self.apch_last_notified[key] = apch
 
-                        ch_id = apch_get_channel(guild_id)
-                        if not ch_id:
-                            continue
-                        channel = self.get_channel(ch_id)
-                        if not channel:
-                            continue
+                            ch_id = apch_get_channel(guild_id)
+                            if not ch_id:
+                                continue
+                            channel = self.get_channel(ch_id)
+                            if not channel:
+                                continue
 
-                        bl_strs = []
-                        for bl, ts, te in applicable:
-                            td = f" ({ts}-{te} UTC)" if ts else ""
-                            bl_strs.append(f"{bl}{td}")
-                        embed = discord.Embed(
-                            title=f"⚠️ APCH TYPE 変更 — {icao}",
-                            color=0xFF9900,
-                        )
-                        embed.add_field(name="現在", value=apch, inline=True)
-                        embed.add_field(name="基準", value=" / ".join(bl_strs), inline=True)
-                        if rwy_in_use:
-                            embed.add_field(name="使用滑走路", value=rwy_in_use, inline=True)
-                        if observed:
-                            embed.set_footer(text=f"観測: {observed[:10]} {observed[11:16]}Z")
-                        await channel.send(embed=embed)
-                    elif has_global:
+                            bl_strs = []
+                            for bl, ts, te in applicable:
+                                td = f" ({ts}-{te} UTC)" if ts else ""
+                                bl_strs.append(f"{bl}{td}")
+                            embed = discord.Embed(
+                                title=f"⚠️ APCH TYPE 変更 — {icao}",
+                                color=0xFF9900,
+                            )
+                            embed.add_field(name="現在", value=apch, inline=True)
+                            embed.add_field(name="基準", value=" / ".join(bl_strs), inline=True)
+                            if rwy_in_use:
+                                embed.add_field(name="使用滑走路", value=rwy_in_use, inline=True)
+                            if observed:
+                                embed.set_footer(text=f"観測: {observed[:10]} {observed[11:16]}Z")
+                            await channel.send(embed=embed)
+                            continue  # baseline処理済み
+                        # 全baselineが時間帯外 → グローバルwatchにフォールバック
+                        if not has_global:
+                            continue
+                    if has_global:
                         # グローバルwatch: 変化検知のみ
                         if self.apch_last_notified.get(key) == apch:
                             continue
@@ -1017,6 +1020,10 @@ async def fetch_all_runway_info(http_session):
     except Exception:
         logger.exception("エラーが発生しました")
         return [], "RWY-INFO情報の取得に失敗しました。"
+    # フィールド名を正規化（bulk APIはicao_codeを使用）
+    for rwy in (rwy_list or []):
+        if "icao_code" in rwy and "icao" not in rwy:
+            rwy["icao"] = rwy["icao_code"]
     return rwy_list or [], None
 
 # ── PIREP helper ─────────────────────────────────────────────────
