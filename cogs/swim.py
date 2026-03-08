@@ -676,6 +676,126 @@ class SwimCog(commands.Cog):
             logger.exception("/metarコマンドエラー")
             await interaction.followup.send("エラーが発生しました。しばらくしてから再度お試しください。")
 
+    # ── APCH コマンドグループ ──
+
+    apch_group = app_commands.Group(name="apch", description="APCH TYPE変更監視", guild_only=True)
+
+    @apch_group.command(name="setchannel", description="APCH TYPE変更通知の送信先チャンネルを設定")
+    @app_commands.describe(channel="通知先チャンネル")
+    async def apch_setchannel(self, interaction: discord.Interaction, channel: discord.TextChannel):
+        apch_set_channel(interaction.guild_id, channel.id)
+        await interaction.response.send_message(f"APCH TYPE変更通知の送信先を {channel.mention} に設定しました。")
+
+    @apch_group.command(name="watch", description="全空港のAPCH TYPE変化を監視開始")
+    async def apch_watch(self, interaction: discord.Interaction):
+        if not apch_get_channel(interaction.guild_id):
+            await interaction.response.send_message(
+                "先に `/apch setchannel` で通知先チャンネルを設定してください。", ephemeral=True)
+            return
+        # 既にグローバルwatchが登録されているかチェック
+        existing = [r for r in apch_list_watches(interaction.guild_id) if r[0] == "*"]
+        if existing:
+            await interaction.response.send_message("全空港監視は既に有効です。", ephemeral=True)
+            return
+        apch_add_watch(interaction.guild_id, "*", "*", None, None, interaction.user.id)
+        await interaction.response.send_message(
+            "全空港のAPCH TYPE変化監視を開始しました。変更があるたびに通知します。\n"
+            "個別の基準を登録するには `/apch set <ICAO> <baseline>` を使用してください。")
+
+    @apch_group.command(name="unwatch", description="全空港のAPCH TYPE変化監視を停止")
+    async def apch_unwatch(self, interaction: discord.Interaction):
+        count = apch_remove_watch(interaction.guild_id, "*")
+        if count > 0:
+            await interaction.response.send_message("全空港のAPCH TYPE変化監視を停止しました。")
+        else:
+            await interaction.response.send_message("全空港監視は設定されていません。", ephemeral=True)
+
+    @apch_group.command(name="set", description="空港の基準APCH TYPEを登録")
+    @app_commands.describe(
+        icao="空港のICAOコード（例: RJTT）",
+        baseline="基準APCH TYPE（例: ILS, ILS Y RWY34L）",
+        time_range="適用時間帯 HH:MM-HH:MM UTC（省略時は全時間帯）"
+    )
+    async def apch_set(self, interaction: discord.Interaction, icao: str, baseline: str, time_range: str = None):
+        if not re.match(r'^[A-Z]{4}$', icao.upper()):
+            await interaction.response.send_message(
+                "ICAOコードは4文字の英字で指定してください（例: RJTT）。", ephemeral=True)
+            return
+        if not apch_get_channel(interaction.guild_id):
+            await interaction.response.send_message(
+                "先に `/apch setchannel` で通知先チャンネルを設定してください。", ephemeral=True)
+            return
+        time_start, time_end = None, None
+        if time_range:
+            parsed = parse_time_range(time_range)
+            if not parsed:
+                await interaction.response.send_message(
+                    "時間帯の形式が不正です。`HH:MM-HH:MM`（UTC）で指定してください。例: `22:00-06:00`", ephemeral=True)
+                return
+            time_start, time_end = parsed
+        apch_add_watch(interaction.guild_id, icao, baseline, time_start, time_end, interaction.user.id)
+        time_desc = f" ({time_start}-{time_end} UTC)" if time_start else " (全時間帯)"
+        await interaction.response.send_message(
+            f"**{icao.upper()}** の基準APCH TYPEを「{baseline}」に設定しました。{time_desc}")
+
+    @apch_group.command(name="remove", description="空港のAPCH TYPE監視登録を削除")
+    @app_commands.describe(
+        icao="空港のICAOコード（例: RJTT）",
+        baseline="削除する基準APCH TYPE（省略時はその空港の全登録を削除）",
+        time_range="削除する時間帯 HH:MM-HH:MM UTC（省略時は全時間帯）"
+    )
+    async def apch_remove(self, interaction: discord.Interaction, icao: str, baseline: str = None, time_range: str = None):
+        if not re.match(r'^[A-Z]{4}$', icao.upper()):
+            await interaction.response.send_message(
+                "ICAOコードは4文字の英字で指定してください（例: RJTT）。", ephemeral=True)
+            return
+        time_start, time_end = None, None
+        if time_range:
+            parsed = parse_time_range(time_range)
+            if not parsed:
+                await interaction.response.send_message(
+                    "時間帯の形式が不正です。`HH:MM-HH:MM`（UTC）で指定してください。", ephemeral=True)
+                return
+            time_start, time_end = parsed
+        count = apch_remove_watch(interaction.guild_id, icao, baseline=baseline, time_start=time_start, time_end=time_end)
+        if count > 0:
+            await interaction.response.send_message(f"**{icao.upper()}** の監視登録を{count}件削除しました。")
+        else:
+            await interaction.response.send_message(f"**{icao.upper()}** の該当する監視登録が見つかりません。")
+
+    @apch_group.command(name="list", description="APCH TYPE監視の登録一覧を表示")
+    async def apch_list(self, interaction: discord.Interaction):
+        watches = apch_list_watches(interaction.guild_id)
+        ch_id = apch_get_channel(interaction.guild_id)
+        if not watches and not ch_id:
+            await interaction.response.send_message("APCH TYPE監視は設定されていません。")
+            return
+        lines = []
+        has_global = False
+        # 空港別にグルーピングして表示
+        airport_baselines = {}
+        for icao, baseline, ts, te in watches:
+            if icao == "*":
+                has_global = True
+                continue
+            airport_baselines.setdefault(icao, []).append((baseline, ts, te))
+        if has_global:
+            lines.append("🌐 **全空港変化監視: ON**")
+        for icao in sorted(airport_baselines.keys()):
+            bl_parts = []
+            for baseline, ts, te in airport_baselines[icao]:
+                time_desc = f" ({ts}-{te} UTC)" if ts else ""
+                bl_parts.append(f"\"{baseline}\"{time_desc}")
+            lines.append(f"**{icao}**: {' / '.join(bl_parts)}")
+        if ch_id:
+            lines.append(f"\n通知先: <#{ch_id}>")
+        embed = discord.Embed(
+            title="APCH TYPE 監視一覧",
+            color=0xFF9900,
+            description="\n".join(lines) if lines else "登録なし"
+        )
+        await interaction.response.send_message(embed=embed)
+
     # ── ループの仮定義（後のタスクで中身を移動） ──
 
     @tasks.loop(seconds=300)
