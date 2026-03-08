@@ -64,7 +64,7 @@ export DISCORD_BOT_TOKEN="your-bot-token-here"
 DISCORD_BOT_TOKEN=your-bot-token-here
 
 # NOTAM/ATIS/METAR/PIREP機能（オプション: SWIM非公式APIが必要）
-SWIM_API_URL=http://swim-api:8000
+SWIM_API_URL=your-swim-api-url
 SWIM_API_TOKEN=your-swim-api-token
 
 # PIREP タービュランス自動通知（デフォルト: true）
