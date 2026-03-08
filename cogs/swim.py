@@ -9,6 +9,7 @@ import logging
 import io
 from datetime import datetime, timezone
 from staticmap import StaticMap, CircleMarker
+from vatsim_stat_notify_to_discord import get_db
 
 logger = logging.getLogger("vatjpn-bot")
 
@@ -55,6 +56,94 @@ async def _swim_request(http_session, path, label="SWIM", params=None, retries=1
             logger.exception("SWIM APIリクエストエラー (%s)", label)
             return None, f"{label}情報の取得に失敗しました。"
     return None, last_err
+
+# ── APCH TYPE monitoring helpers ──────────────────────────────────
+
+def apch_set_channel(guild_id, channel_id):
+    conn = get_db()
+    with conn:
+        conn.execute("INSERT OR REPLACE INTO apch_config (guild_id, channel_id) VALUES (?, ?)",
+                     (str(guild_id), str(channel_id)))
+
+def apch_get_channel(guild_id):
+    conn = get_db()
+    with conn:
+        row = conn.execute("SELECT channel_id FROM apch_config WHERE guild_id = ?",
+                          (str(guild_id),)).fetchone()
+    return int(row[0]) if row else None
+
+def apch_add_watch(guild_id, icao, baseline, time_start, time_end, registered_by):
+    conn = get_db()
+    with conn:
+        # 同じguild+icao+baseline+時間帯の既存レコードを削除してから挿入（重複防止、異なるbaselineは共存）
+        conn.execute(
+            "DELETE FROM apch_watches WHERE guild_id = ? AND icao = ? AND baseline = ? AND time_start IS ? AND time_end IS ?",
+            (str(guild_id), icao.upper(), baseline, time_start, time_end))
+        conn.execute(
+            "INSERT INTO apch_watches (guild_id, icao, baseline, time_start, time_end, registered_by) VALUES (?, ?, ?, ?, ?, ?)",
+            (str(guild_id), icao.upper(), baseline, time_start, time_end, str(registered_by)))
+
+def apch_remove_watch(guild_id, icao, baseline=None, time_start=None, time_end=None):
+    """登録を削除。baseline/time指定で絞り込み可。削除件数を返す。"""
+    conn = get_db()
+    with conn:
+        if baseline is not None:
+            c = conn.execute(
+                "DELETE FROM apch_watches WHERE guild_id = ? AND icao = ? AND baseline = ? AND time_start IS ? AND time_end IS ?",
+                (str(guild_id), icao.upper(), baseline, time_start, time_end))
+        elif time_start is not None and time_end is not None:
+            c = conn.execute(
+                "DELETE FROM apch_watches WHERE guild_id = ? AND icao = ? AND time_start IS ? AND time_end IS ?",
+                (str(guild_id), icao.upper(), time_start, time_end))
+        else:
+            c = conn.execute(
+                "DELETE FROM apch_watches WHERE guild_id = ? AND icao = ?",
+                (str(guild_id), icao.upper()))
+        return c.rowcount
+
+def apch_list_watches(guild_id):
+    conn = get_db()
+    with conn:
+        rows = conn.execute(
+            "SELECT icao, baseline, time_start, time_end FROM apch_watches WHERE guild_id = ? ORDER BY icao, time_start",
+            (str(guild_id),)).fetchall()
+    return rows
+
+def apch_get_all_watches():
+    """全ギルドの監視設定をchannel_id付きで取得（ポーリング用）。"""
+    conn = get_db()
+    with conn:
+        rows = conn.execute(
+            "SELECT w.guild_id, w.icao, w.baseline, w.time_start, w.time_end, c.channel_id "
+            "FROM apch_watches w LEFT JOIN apch_config c ON w.guild_id = c.guild_id "
+            "ORDER BY w.guild_id, w.icao"
+        ).fetchall()
+    return rows
+
+def parse_time_range(time_range_str):
+    """'HH:MM-HH:MM' をパースして (start, end) を返す。不正な場合は None。"""
+    m = re.match(r'^(\d{2}:\d{2})-(\d{2}:\d{2})$', time_range_str)
+    if not m:
+        return None
+    for part in (m.group(1), m.group(2)):
+        h, mi = map(int, part.split(":"))
+        if h > 23 or mi > 59:
+            return None
+    return m.group(1), m.group(2)
+
+def is_in_time_range(time_start, time_end):
+    """現在UTC時刻が time_start〜time_end の範囲内かを判定する。日跨ぎ対応。"""
+    now = datetime.now(timezone.utc)
+    now_minutes = now.hour * 60 + now.minute
+    sh, sm = map(int, time_start.split(":"))
+    eh, em = map(int, time_end.split(":"))
+    start_minutes = sh * 60 + sm
+    end_minutes = eh * 60 + em
+    if start_minutes <= end_minutes:
+        return start_minutes <= now_minutes < end_minutes
+    else:
+        # 日跨ぎ: 22:00-06:00 → 22:00<=now OR now<06:00
+        return now_minutes >= start_minutes or now_minutes < end_minutes
 
 
 class SwimCog(commands.Cog):
