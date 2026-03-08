@@ -91,6 +91,7 @@ services:
   discord-bot:
     build: .
     volumes:
+      - ./vatsim_stat_notify_to_discord.py:/app/vatsim_stat_notify_to_discord.py:ro
       - ./settings.ini:/app/settings.ini:ro
       - ./data.json:/app/data.json
       - ./nicknames.json:/app/nicknames.json
@@ -101,6 +102,8 @@ services:
       - SWIM_API_TOKEN=${SWIM_API_TOKEN}
     restart: always
 ```
+
+> **Note:** スクリプト本体をボリュームマウント (`:ro`) することで、コード更新時は `docker compose restart` だけで反映されます。`docker compose build` が必要なのは `requirements.txt` や `Dockerfile` を変更した場合のみです。
 
 ## Credits
 
