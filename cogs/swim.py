@@ -9,13 +9,11 @@ import logging
 import io
 from datetime import datetime, timezone
 from staticmap import StaticMap, CircleMarker
-from vatsim_stat_notify_to_discord import get_db, pirep_channel_id
+from vatsim_stat_notify_to_discord import get_db, pirep_channel_id, swim_api_url, swim_api_token
 
 logger = logging.getLogger("vatjpn-bot")
 
-# 環境変数（メインから参照）
-swim_api_url = os.environ.get("SWIM_API_URL")
-swim_api_token = os.environ.get("SWIM_API_TOKEN")
+# 環境変数（SWIM API設定はメインから参照、通知フラグはCog固有）
 enable_pirep_notifications = os.environ.get("ENABLE_PIREP_NOTIFICATIONS", "true").lower() in ("true", "1", "yes")
 enable_apch_notifications = os.environ.get("ENABLE_APCH_NOTIFICATIONS", "true").lower() in ("true", "1", "yes")
 
