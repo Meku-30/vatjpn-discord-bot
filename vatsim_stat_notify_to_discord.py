@@ -109,8 +109,9 @@ stats_db_filename = config.get("DATAFILE_CONFIG", "stats_db_filename", fallback=
 # ── SQLite ─────────────────────────────────────────────────────────
 
 def init_db():
-    conn = sqlite3.connect(stats_db_filename)
-    c = conn.cursor()
+    global _db_conn
+    _db_conn = sqlite3.connect(stats_db_filename, check_same_thread=False)
+    c = _db_conn.cursor()
     c.execute("PRAGMA journal_mode=WAL")
     c.execute("""CREATE TABLE IF NOT EXISTS sessions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -142,24 +143,32 @@ def init_db():
         registered_by TEXT NOT NULL
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_apch_watches_guild_icao ON apch_watches(guild_id, icao)")
-    conn.commit()
-    conn.close()
+    _db_conn.commit()
+
+_db_conn = None
+
+def get_db():
+    """永続SQLite接続を返す。"""
+    return _db_conn
 
 # ── APCH TYPE monitoring helpers ──────────────────────────────────
 
 def apch_set_channel(guild_id, channel_id):
-    with sqlite3.connect(stats_db_filename) as conn:
+    conn = get_db()
+    with conn:
         conn.execute("INSERT OR REPLACE INTO apch_config (guild_id, channel_id) VALUES (?, ?)",
                      (str(guild_id), str(channel_id)))
 
 def apch_get_channel(guild_id):
-    with sqlite3.connect(stats_db_filename) as conn:
+    conn = get_db()
+    with conn:
         row = conn.execute("SELECT channel_id FROM apch_config WHERE guild_id = ?",
                           (str(guild_id),)).fetchone()
     return int(row[0]) if row else None
 
 def apch_add_watch(guild_id, icao, baseline, time_start, time_end, registered_by):
-    with sqlite3.connect(stats_db_filename) as conn:
+    conn = get_db()
+    with conn:
         # 同じguild+icao+baseline+時間帯の既存レコードを削除してから挿入（重複防止、異なるbaselineは共存）
         conn.execute(
             "DELETE FROM apch_watches WHERE guild_id = ? AND icao = ? AND baseline = ? AND time_start IS ? AND time_end IS ?",
@@ -170,7 +179,8 @@ def apch_add_watch(guild_id, icao, baseline, time_start, time_end, registered_by
 
 def apch_remove_watch(guild_id, icao, baseline=None, time_start=None, time_end=None):
     """登録を削除。baseline/time指定で絞り込み可。削除件数を返す。"""
-    with sqlite3.connect(stats_db_filename) as conn:
+    conn = get_db()
+    with conn:
         if baseline is not None:
             c = conn.execute(
                 "DELETE FROM apch_watches WHERE guild_id = ? AND icao = ? AND baseline = ? AND time_start IS ? AND time_end IS ?",
@@ -186,17 +196,21 @@ def apch_remove_watch(guild_id, icao, baseline=None, time_start=None, time_end=N
         return c.rowcount
 
 def apch_list_watches(guild_id):
-    with sqlite3.connect(stats_db_filename) as conn:
+    conn = get_db()
+    with conn:
         rows = conn.execute(
             "SELECT icao, baseline, time_start, time_end FROM apch_watches WHERE guild_id = ? ORDER BY icao, time_start",
             (str(guild_id),)).fetchall()
     return rows
 
 def apch_get_all_watches():
-    """全ギルドの監視設定を取得（ポーリング用）。"""
-    with sqlite3.connect(stats_db_filename) as conn:
+    """全ギルドの監視設定をchannel_id付きで取得（ポーリング用）。"""
+    conn = get_db()
+    with conn:
         rows = conn.execute(
-            "SELECT guild_id, icao, baseline, time_start, time_end FROM apch_watches ORDER BY guild_id, icao"
+            "SELECT w.guild_id, w.icao, w.baseline, w.time_start, w.time_end, c.channel_id "
+            "FROM apch_watches w LEFT JOIN apch_config c ON w.guild_id = c.guild_id "
+            "ORDER BY w.guild_id, w.icao"
         ).fetchall()
     return rows
 
@@ -235,7 +249,8 @@ def log_session(atc_info):
             duration_seconds = int((logoff_time - logon_time).total_seconds())
         except (ValueError, TypeError):
             pass
-    with sqlite3.connect(stats_db_filename) as conn:
+    conn = get_db()
+    with conn:
         conn.execute(
             "INSERT INTO sessions (cid, callsign, rating, logon_time, logoff_time, duration_seconds) VALUES (?, ?, ?, ?, ?, ?)",
             (atc_info["cid"], atc_info["callsign"], atc_info["rating"],
@@ -243,22 +258,26 @@ def log_session(atc_info):
         )
 
 def link_user(discord_id, cid):
-    with sqlite3.connect(stats_db_filename) as conn:
+    conn = get_db()
+    with conn:
         conn.execute("INSERT OR REPLACE INTO user_links (discord_id, cid) VALUES (?, ?)", (str(discord_id), cid))
 
 def unlink_user(discord_id):
-    with sqlite3.connect(stats_db_filename) as conn:
+    conn = get_db()
+    with conn:
         cursor = conn.execute("DELETE FROM user_links WHERE discord_id = ?", (str(discord_id),))
         return cursor.rowcount > 0
 
 def get_linked_cid(discord_id):
-    with sqlite3.connect(stats_db_filename) as conn:
+    conn = get_db()
+    with conn:
         row = conn.execute("SELECT cid FROM user_links WHERE discord_id = ?", (str(discord_id),)).fetchone()
         return row[0] if row else None
 
 def get_controller_stats(cid):
     """Get statistics for a given CID from local DB. Returns dict or None."""
-    with sqlite3.connect(stats_db_filename) as conn:
+    conn = get_db()
+    with conn:
         c = conn.cursor()
 
         c.execute("SELECT COUNT(*), SUM(duration_seconds) FROM sessions WHERE cid = ?", (cid,))
@@ -297,13 +316,17 @@ def get_controller_stats(cid):
 async def fetch_vatsim_member(http_session, cid):
     """Fetch member info and stats from VATSIM API. Returns dict or None."""
     try:
-        async with http_session.get(f"https://api.vatsim.net/v2/members/{cid}") as resp:
-            if resp.status != 200:
+        info_resp, stats_resp = await asyncio.gather(
+            http_session.get(f"https://api.vatsim.net/v2/members/{cid}"),
+            http_session.get(f"https://api.vatsim.net/v2/members/{cid}/stats"),
+        )
+        async with info_resp:
+            if info_resp.status != 200:
                 return None
-            info = await resp.json()
-        async with http_session.get(f"https://api.vatsim.net/v2/members/{cid}/stats") as resp:
-            if resp.status == 200:
-                info["stats"] = await resp.json()
+            info = await info_resp.json()
+        async with stats_resp:
+            if stats_resp.status == 200:
+                info["stats"] = await stats_resp.json()
         return info
     except Exception:
         return None
@@ -460,6 +483,10 @@ class VATJPNBot(discord.Client):
         self._pirep_first_run = True
         self.apch_last_notified = {}  # (guild_id, icao) → 前回通知した approach_type
         self._apch_first_run = True
+        # VATSIMデータキャッシュ（ポーリングで取得したデータをコマンドから再利用）
+        self._vatsim_cache = {}  # 最新のcontrollers_map
+        self._vatsim_cache_full = {}  # 最新のフルレスポンス（pilots, prefiles含む）
+        self._vatsim_etag = None  # ETag for conditional requests
 
     async def setup_hook(self):
         timeout = aiohttp.ClientTimeout(total=10)
@@ -536,7 +563,7 @@ class VATJPNBot(discord.Client):
                 if cn in self.pirep_notified:
                     continue
                 self.pirep_notified.add(cn)
-                embed, map_file = build_pirep_embed(p)
+                embed, map_file = await build_pirep_embed(p)
                 await channel.send(embed=embed, file=map_file) if map_file else await channel.send(embed=embed)
 
         except Exception:
@@ -556,7 +583,10 @@ class VATJPNBot(discord.Client):
             # グローバルwatch (icao="*") の有無と、空港別baseline登録を分類
             guilds_with_global = set()
             guild_watches = {}  # guild_id → {icao: [(baseline, ts, te), ...]}
-            for guild_id, icao, baseline, ts, te in all_watches:
+            guild_channels = {}  # guild_id → channel_id
+            for guild_id, icao, baseline, ts, te, channel_id in all_watches:
+                if channel_id:
+                    guild_channels[guild_id] = int(channel_id)
                 if icao == "*":
                     guilds_with_global.add(guild_id)
                 else:
@@ -645,7 +675,7 @@ class VATJPNBot(discord.Client):
                             prev_apch = self.apch_last_notified.get(key, "")
                             self.apch_last_notified[key] = apch
 
-                            ch_id = apch_get_channel(guild_id)
+                            ch_id = guild_channels.get(guild_id)
                             if not ch_id:
                                 continue
                             channel = self.get_channel(ch_id)
@@ -680,7 +710,7 @@ class VATJPNBot(discord.Client):
                         if not prev_apch:
                             continue  # 初回観測はキャッシュのみ
 
-                        ch_id = apch_get_channel(guild_id)
+                        ch_id = guild_channels.get(guild_id)
                         if not ch_id:
                             continue
                         channel = self.get_channel(ch_id)
@@ -719,14 +749,22 @@ bot = VATJPNBot()
 
 # ── Helper functions ───────────────────────────────────────────────
 
+_nicknames_cache = None
+
 def load_nicknames():
+    global _nicknames_cache
+    if _nicknames_cache is not None:
+        return _nicknames_cache
     try:
         with open(nickname_filename, "r") as f:
-            return json.load(f)
+            _nicknames_cache = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
-        return {}
+        _nicknames_cache = {}
+    return _nicknames_cache
 
 def save_nicknames(nicknames):
+    global _nicknames_cache
+    _nicknames_cache = nicknames
     with open(nickname_filename, "w") as f:
         json.dump(nicknames, f, ensure_ascii=False, indent=2)
 
@@ -745,25 +783,52 @@ def get_old():
         return {}
 
 async def get_new(http_session):
-    async with http_session.get(vatsim_stat_json_url) as resp:
-        vatsim_info = await resp.json()
+    """VATSIMデータを取得。ETag対応で変更なし時はNoneを返す。エラー時も前回データを維持するためNoneを返す。"""
+    headers = {}
+    if bot._vatsim_etag:
+        headers["If-None-Match"] = bot._vatsim_etag
+    try:
+        async with http_session.get(vatsim_stat_json_url, headers=headers) as resp:
+            if resp.status == 304:
+                return None  # 変更なし
+            if resp.status != 200:
+                logger.warning("VATSIM API HTTP %d", resp.status)
+                return None
+            etag = resp.headers.get("ETag")
+            if etag:
+                bot._vatsim_etag = etag
+            vatsim_info = await resp.json()
+    except (asyncio.TimeoutError, aiohttp.ClientError):
+        logger.warning("VATSIM APIリクエスト失敗")
+        return None
+    except Exception:
+        logger.exception("VATSIM APIリクエストエラー")
+        return None
+
     controllers = vatsim_info.get("controllers", [])
     controllers_map = {c["callsign"]: c for c in controllers}
+    # フルレスポンスをキャッシュ（/online, /sup, /traffic用）
+    bot._vatsim_cache = controllers_map
+    bot._vatsim_cache_full = vatsim_info
     return controllers_map
 
 async def get_controllers(http_session):
     old_stat = get_old()
     new_stat = await get_new(http_session)
 
+    if new_stat is None:
+        # APIエラーまたは変更なし → 差分なし（誤通知防止）
+        return {d: old_stat[d] for d in old_stat if pattern.match(old_stat[d]['callsign']) is not None and old_stat[d]["rating"] > 1}, {}, {}
+
     with open(data_filename, "w") as a_file:
         json.dump(new_stat, a_file)
 
-    connected_controllers = { k : new_stat[k] for k in set(new_stat) - set(old_stat) }
-    disconnected_controllers = { k : old_stat[k] for k in set(old_stat) - set(new_stat) }
+    connected_controllers = {k: new_stat[k] for k in set(new_stat) - set(old_stat)}
+    disconnected_controllers = {k: old_stat[k] for k in set(old_stat) - set(new_stat)}
 
-    connected_controllers = { d: connected_controllers[d] for d in connected_controllers if pattern.match(connected_controllers[d]['callsign']) is not None and connected_controllers[d]["rating"]>1 }
-    disconnected_controllers = { d: disconnected_controllers[d] for d in disconnected_controllers if pattern.match(disconnected_controllers[d]['callsign']) is not None and disconnected_controllers[d]["rating"]>1 }
-    all_controllers = { d: new_stat[d] for d in new_stat if pattern.match(new_stat[d]['callsign']) is not None and new_stat[d]["rating"]>1 }
+    connected_controllers = {d: connected_controllers[d] for d in connected_controllers if pattern.match(connected_controllers[d]['callsign']) is not None and connected_controllers[d]["rating"] > 1}
+    disconnected_controllers = {d: disconnected_controllers[d] for d in disconnected_controllers if pattern.match(disconnected_controllers[d]['callsign']) is not None and disconnected_controllers[d]["rating"] > 1}
+    all_controllers = {d: new_stat[d] for d in new_stat if pattern.match(new_stat[d]['callsign']) is not None and new_stat[d]["rating"] > 1}
 
     return all_controllers, connected_controllers, disconnected_controllers
 
@@ -831,30 +896,54 @@ async def get_discord_embed(connect_type, atc_info, current_list, http_session=N
             embed.add_field(name='接続時間', value=format_duration(atc_info["logon_time"]))
         return embed
 
+# ── SWIM API common helper ────────────────────────────────────────
+
+_swim_headers = None
+
+def _get_swim_headers():
+    global _swim_headers
+    if _swim_headers is None and swim_api_token:
+        _swim_headers = {"Authorization": f"Bearer {swim_api_token}"}
+    return _swim_headers
+
+async def _swim_request(http_session, path, label="SWIM", params=None, retries=1):
+    """SWIM APIへの共通リクエスト。5xx/タイムアウト時にリトライ。Returns (json_data, error_msg)."""
+    if not swim_api_url or not swim_api_token:
+        return None, f"{label}機能を使用するにはSWIM_API_URL/SWIM_API_TOKEN環境変数の設定が必要です。"
+    url = f"{swim_api_url}{path}"
+    last_err = None
+    for attempt in range(1 + retries):
+        try:
+            async with http_session.get(url, headers=_get_swim_headers(), params=params) as resp:
+                if resp.status in (401, 403):
+                    return None, "SWIM APIの認証に失敗しました。トークンを確認してください。"
+                if resp.status >= 500 and attempt < retries:
+                    last_err = f"SWIM APIエラー (HTTP {resp.status})"
+                    await asyncio.sleep(2)
+                    continue
+                if resp.status != 200:
+                    return None, f"SWIM APIエラー (HTTP {resp.status})"
+                return await resp.json(), None
+        except asyncio.TimeoutError:
+            last_err = f"{label}情報の取得がタイムアウトしました。"
+            if attempt < retries:
+                await asyncio.sleep(2)
+                continue
+        except Exception:
+            logger.exception("エラーが発生しました")
+            return None, f"{label}情報の取得に失敗しました。"
+    return None, last_err
+
 # ── NOTAM helper ──────────────────────────────────────────────────
 
 NOTAM_PER_PAGE = 5
 
 async def fetch_notams(http_session, icao):
     """SWIM非公式APIから有効なNOTAMを取得。Returns (notams_list, total_count, error_msg)."""
-    if not swim_api_url or not swim_api_token:
-        return [], 0, "NOTAM機能を使用するにはSWIM_API_URL/SWIM_API_TOKEN環境変数の設定が必要です。"
-    headers = {"Authorization": f"Bearer {swim_api_token}"}
-    url = f"{swim_api_url}/api/notams/active"
-    params = {"icao": icao.upper()}
-    try:
-        async with http_session.get(url, headers=headers, params=params) as resp:
-            if resp.status == 401 or resp.status == 403:
-                return [], 0, "SWIM APIの認証に失敗しました。トークンを確認してください。"
-            if resp.status != 200:
-                return [], 0, f"SWIM APIエラー (HTTP {resp.status})"
-            notams = await resp.json()
-    except asyncio.TimeoutError:
-        return [], 0, "NOTAM情報の取得がタイムアウトしました。"
-    except Exception:
-        logger.exception("エラーが発生しました")
-        return [], 0, "NOTAM情報の取得に失敗しました。"
-    return notams, len(notams), None
+    data, err = await _swim_request(http_session, "/api/notams/active", "NOTAM", params={"icao": icao.upper()})
+    if err:
+        return [], 0, err
+    return data or [], len(data or []), None
 
 def format_notam_page(notams, page, icao, total_count, keyword=None):
     """NOTAMリストの指定ページをEmbed形式で生成。"""
@@ -919,112 +1008,41 @@ class NotamPaginationView(discord.ui.View):
 
 async def fetch_atis(http_session, icao):
     """SWIM非公式APIから最新ATISを取得。Returns (atis_dict, error_msg)."""
-    if not swim_api_url or not swim_api_token:
-        return None, "ATIS機能を使用するにはSWIM_API_URL/SWIM_API_TOKEN環境変数の設定が必要です。"
-    headers = {"Authorization": f"Bearer {swim_api_token}"}
-    url = f"{swim_api_url}/api/atis/{icao.upper()}"
-    try:
-        async with http_session.get(url, headers=headers) as resp:
-            if resp.status == 401 or resp.status == 403:
-                return None, "SWIM APIの認証に失敗しました。トークンを確認してください。"
-            if resp.status != 200:
-                return None, f"SWIM APIエラー (HTTP {resp.status})"
-            atis = await resp.json()
-    except asyncio.TimeoutError:
-        return None, "ATIS情報の取得がタイムアウトしました。"
-    except Exception:
-        logger.exception("エラーが発生しました")
-        return None, "ATIS情報の取得に失敗しました。"
-    return atis, None
+    return await _swim_request(http_session, f"/api/atis/{icao.upper()}", "ATIS")
 
 async def fetch_all_atis(http_session):
     """SWIM非公式APIから全空港ATISを一括取得。Returns (atis_list, error_msg)."""
-    if not swim_api_url or not swim_api_token:
-        return [], "ATIS機能を使用するにはSWIM_API_URL/SWIM_API_TOKEN環境変数の設定が必要です。"
-    headers = {"Authorization": f"Bearer {swim_api_token}"}
-    url = f"{swim_api_url}/api/atis"
-    try:
-        async with http_session.get(url, headers=headers) as resp:
-            if resp.status == 401 or resp.status == 403:
-                return [], "SWIM APIの認証に失敗しました。トークンを確認してください。"
-            if resp.status != 200:
-                return [], f"SWIM APIエラー (HTTP {resp.status})"
-            atis_list = await resp.json()
-    except asyncio.TimeoutError:
-        return [], "ATIS情報の取得がタイムアウトしました。"
-    except Exception:
-        logger.exception("エラーが発生しました")
-        return [], "ATIS情報の取得に失敗しました。"
-    return atis_list or [], None
+    data, err = await _swim_request(http_session, "/api/atis", "ATIS")
+    if err:
+        return [], err
+    return data or [], None
 
 # ── METAR helper ──────────────────────────────────────────────────
 
 async def fetch_metar(http_session, icao):
     """SWIM非公式APIから最新METARを取得。Returns (metar_dict, error_msg)."""
-    if not swim_api_url or not swim_api_token:
-        return None, "METAR機能を使用するにはSWIM_API_URL/SWIM_API_TOKEN環境変数の設定が必要です。"
-    headers = {"Authorization": f"Bearer {swim_api_token}"}
-    url = f"{swim_api_url}/api/weather/{icao.upper()}"
-    try:
-        async with http_session.get(url, headers=headers) as resp:
-            if resp.status == 401 or resp.status == 403:
-                return None, "SWIM APIの認証に失敗しました。トークンを確認してください。"
-            if resp.status != 200:
-                return None, f"SWIM APIエラー (HTTP {resp.status})"
-            weather_list = await resp.json()
-    except asyncio.TimeoutError:
-        return None, "METAR情報の取得がタイムアウトしました。"
-    except Exception:
-        logger.exception("エラーが発生しました")
-        return None, "METAR情報の取得に失敗しました。"
-    metar = next((w for w in weather_list if w.get("type") == "METAR"), None)
+    data, err = await _swim_request(http_session, f"/api/weather/{icao.upper()}", "METAR")
+    if err:
+        return None, err
+    metar = next((w for w in (data or []) if w.get("type") == "METAR"), None)
     return metar, None
 
 # ── RWY-INFO helper ──────────────────────────────────────────────
 
 async def fetch_runway_info(http_session, icao):
     """SWIM非公式APIから最新RWY-INFOを取得。Returns (rwy_dict, error_msg)."""
-    if not swim_api_url or not swim_api_token:
-        return None, "RWY-INFO機能を使用するにはSWIM_API_URL/SWIM_API_TOKEN環境変数の設定が必要です。"
-    headers = {"Authorization": f"Bearer {swim_api_token}"}
-    url = f"{swim_api_url}/api/runway-info/{icao.upper()}"
-    try:
-        async with http_session.get(url, headers=headers) as resp:
-            if resp.status == 401 or resp.status == 403:
-                return None, "SWIM APIの認証に失敗しました。トークンを確認してください。"
-            if resp.status != 200:
-                return None, None
-            rwy = await resp.json()
-    except asyncio.TimeoutError:
-        return None, "RWY-INFO情報の取得がタイムアウトしました。"
-    except Exception:
-        logger.exception("エラーが発生しました")
-        return None, "RWY-INFO情報の取得に失敗しました。"
-    return rwy, None
+    return await _swim_request(http_session, f"/api/runway-info/{icao.upper()}", "RWY-INFO")
 
 async def fetch_all_runway_info(http_session):
     """SWIM非公式APIから全空港のRWY-INFOを一括取得。Returns (rwy_list, error_msg)."""
-    if not swim_api_url or not swim_api_token:
-        return [], "RWY-INFO機能を使用するにはSWIM_API_URL/SWIM_API_TOKEN環境変数の設定が必要です。"
-    headers = {"Authorization": f"Bearer {swim_api_token}"}
-    url = f"{swim_api_url}/api/runway-info"
-    try:
-        async with http_session.get(url, headers=headers) as resp:
-            if resp.status == 401 or resp.status == 403:
-                return [], "SWIM APIの認証に失敗しました。トークンを確認してください。"
-            if resp.status != 200:
-                return [], f"SWIM APIエラー (HTTP {resp.status})"
-            rwy_list = await resp.json()
-    except asyncio.TimeoutError:
-        return [], "RWY-INFO情報の取得がタイムアウトしました。"
-    except Exception:
-        logger.exception("エラーが発生しました")
-        return [], "RWY-INFO情報の取得に失敗しました。"
+    data, err = await _swim_request(http_session, "/api/runway-info", "RWY-INFO")
+    if err:
+        return [], err
     # フィールド名を正規化（bulk APIはicao_codeを使用）
-    for rwy in (rwy_list or []):
+    for rwy in (data or []):
         if "icao_code" in rwy and "icao" not in rwy:
             rwy["icao"] = rwy["icao_code"]
-    return rwy_list or [], None
+    return data or [], None
 
 # ── PIREP helper ─────────────────────────────────────────────────
 
@@ -1049,23 +1067,10 @@ def turbulence_level(strength):
 
 async def fetch_active_pireps(http_session):
     """SWIM非公式APIから有効なPIREPを取得。Returns (pirep_list, error_msg)."""
-    if not swim_api_url or not swim_api_token:
-        return [], "PIREP機能を使用するにはSWIM_API_URL/SWIM_API_TOKEN環境変数の設定が必要です。"
-    headers = {"Authorization": f"Bearer {swim_api_token}"}
-    url = f"{swim_api_url}/api/pireps/active"
-    try:
-        async with http_session.get(url, headers=headers) as resp:
-            if resp.status == 401 or resp.status == 403:
-                return [], "SWIM APIの認証に失敗しました。トークンを確認してください。"
-            if resp.status != 200:
-                return [], f"SWIM APIエラー (HTTP {resp.status})"
-            pireps = await resp.json()
-    except asyncio.TimeoutError:
-        return [], "PIREP情報の取得がタイムアウトしました。"
-    except Exception:
-        logger.exception("エラーが発生しました")
-        return [], "PIREP情報の取得に失敗しました。"
-    return pireps or [], None
+    data, err = await _swim_request(http_session, "/api/pireps/active", "PIREP")
+    if err:
+        return [], err
+    return data or [], None
 
 JAPAN_TRANSITION_FL = 140  # FL140 = 14,000ft
 
@@ -1152,7 +1157,7 @@ def generate_pirep_map(lat, lon):
     buf.seek(0)
     return discord.File(buf, filename="pirep_map.png")
 
-def build_pirep_embed(pirep):
+async def build_pirep_embed(pirep):
     """MOD以上のPIREP用Embedとマップファイルを作成する。(embed, file_or_none)を返す。"""
     strength_code = pirep.get("turbulence_strength", "")
     strength_label = TURBULENCE_MAP.get(strength_code, strength_code)
@@ -1177,7 +1182,7 @@ def build_pirep_embed(pirep):
     coords = parse_pirep_coords(pirep)
     if coords:
         try:
-            map_file = generate_pirep_map(*coords)
+            map_file = await asyncio.to_thread(generate_pirep_map, *coords)
             embed.set_image(url="attachment://pirep_map.png")
         except Exception:
             logger.warning("PIREPマップ生成失敗", exc_info=True)
@@ -1200,8 +1205,10 @@ def build_pirep_embed(pirep):
 async def online_command(interaction: discord.Interaction):
     await interaction.response.defer()
     try:
-        async with bot.http_session.get(vatsim_stat_json_url) as resp:
-            vatsim_info = await resp.json()
+        vatsim_info = bot._vatsim_cache_full
+        if not vatsim_info:
+            async with bot.http_session.get(vatsim_stat_json_url) as resp:
+                vatsim_info = await resp.json()
         controllers = vatsim_info.get("controllers", [])
         jp_controllers = [c for c in controllers if pattern.match(c["callsign"]) and c["rating"] > 1]
 
@@ -1273,8 +1280,10 @@ bot.tree.add_command(nickname_group)
 async def sup_command(interaction: discord.Interaction):
     await interaction.response.defer()
     try:
-        async with bot.http_session.get(vatsim_stat_json_url) as resp:
-            vatsim_info = await resp.json()
+        vatsim_info = bot._vatsim_cache_full
+        if not vatsim_info:
+            async with bot.http_session.get(vatsim_stat_json_url) as resp:
+                vatsim_info = await resp.json()
         controllers = vatsim_info.get("controllers", [])
         sups = [c for c in controllers if c["rating"] >= 11]
 
@@ -1510,8 +1519,10 @@ async def traffic_command(interaction: discord.Interaction, icao: str):
     await interaction.response.defer()
     try:
         icao = icao.upper()
-        async with bot.http_session.get(vatsim_stat_json_url) as resp:
-            vatsim_info = await resp.json()
+        vatsim_info = bot._vatsim_cache_full
+        if not vatsim_info:
+            async with bot.http_session.get(vatsim_stat_json_url) as resp:
+                vatsim_info = await resp.json()
 
         pilots = vatsim_info.get("pilots", [])
         prefiles = vatsim_info.get("prefiles", [])
@@ -1616,16 +1627,16 @@ async def stats_command(interaction: discord.Interaction, days: int = 7, positio
         if position:
             period_label += f" | {position}"
 
-        with sqlite3.connect(stats_db_filename) as conn:
-            query = "SELECT cid, callsign, duration_seconds FROM sessions WHERE 1=1"
-            params = []
-            if start:
-                query += " AND logoff_time >= ?"
-                params.append(start.isoformat())
-            if position:
-                query += " AND callsign LIKE ?"
-                params.append(f"%{position}%")
-            rows = conn.execute(query, params).fetchall()
+        conn = get_db()
+        query = "SELECT cid, callsign, duration_seconds FROM sessions WHERE 1=1"
+        params = []
+        if start:
+            query += " AND logoff_time >= ?"
+            params.append(start.isoformat())
+        if position:
+            query += " AND callsign LIKE ?"
+            params.append(f"%{position}%")
+        rows = conn.execute(query, params).fetchall()
 
         if not rows:
             await interaction.followup.send(f"📊 **VATJPN 管制統計 ({period_label})**\n\nデータがありません。")
