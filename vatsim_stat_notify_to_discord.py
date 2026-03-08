@@ -522,7 +522,7 @@ class VATJPNBot(discord.Client):
                 await channel.send(embed=await get_discord_embed('disconnect', disconnected[a], all_controllers))
                 log_session(disconnected[a])
         except Exception:
-            logger.exception("エラーが発生しました")
+            logger.exception("ポーリングループエラー")
 
     @polling_loop.before_loop
     async def before_polling(self):
@@ -930,7 +930,7 @@ async def _swim_request(http_session, path, label="SWIM", params=None, retries=1
                 await asyncio.sleep(2)
                 continue
         except Exception:
-            logger.exception("エラーが発生しました")
+            logger.exception("SWIM APIリクエストエラー (%s)", label)
             return None, f"{label}情報の取得に失敗しました。"
     return None, last_err
 
@@ -1235,7 +1235,7 @@ async def online_command(interaction: discord.Interaction):
         embed.set_footer(text=f"Total: {len(jp_controllers)} controller(s)")
         await interaction.followup.send(embed=embed)
     except Exception as e:
-        logger.exception("エラーが発生しました")
+        logger.exception("/onlineコマンドエラー")
         await interaction.followup.send("エラーが発生しました。しばらくしてから再度お試しください。")
 
 nickname_group = app_commands.Group(name="nickname", description="CIDニックネーム管理")
@@ -1306,7 +1306,7 @@ async def sup_command(interaction: discord.Interaction):
         embed.set_footer(text=f"Total: {len(sups)} supervisor(s)")
         await interaction.followup.send(embed=embed)
     except Exception as e:
-        logger.exception("エラーが発生しました")
+        logger.exception("/supコマンドエラー")
         await interaction.followup.send("エラーが発生しました。しばらくしてから再度お試しください。")
 
 @bot.tree.command(name="notam", description="空港のNOTAMを表示")
@@ -1362,7 +1362,7 @@ async def notam_command(interaction: discord.Interaction, icao: str, keyword: st
         view = NotamPaginationView(notams, icao_input, total_count, keyword) if total_pages > 1 else None
         await interaction.followup.send(embed=embed, view=view)
     except Exception:
-        logger.exception("エラーが発生しました")
+        logger.exception("/notamコマンドエラー")
         await interaction.followup.send("エラーが発生しました。しばらくしてから再度お試しください。")
 
 @bot.tree.command(name="atis", description="空港のATIS情報を表示")
@@ -1480,7 +1480,7 @@ async def atis_command(interaction: discord.Interaction, icao: str):
         )
         await interaction.followup.send(embed=embed)
     except Exception:
-        logger.exception("エラーが発生しました")
+        logger.exception("/atisコマンドエラー")
         await interaction.followup.send("エラーが発生しました。しばらくしてから再度お試しください。")
 
 @bot.tree.command(name="metar", description="空港のMETAR情報を表示")
@@ -1510,7 +1510,7 @@ async def metar_command(interaction: discord.Interaction, icao: str):
         )
         await interaction.followup.send(embed=embed)
     except Exception:
-        logger.exception("エラーが発生しました")
+        logger.exception("/metarコマンドエラー")
         await interaction.followup.send("エラーが発生しました。しばらくしてから再度お試しください。")
 
 @bot.tree.command(name="traffic", description="指定空港の発着予定トラフィック一覧")
@@ -1606,7 +1606,7 @@ async def traffic_command(interaction: discord.Interaction, icao: str):
         embed.set_footer(text=f"Total: {total} flight(s)")
         await interaction.followup.send(embed=embed)
     except Exception as e:
-        logger.exception("エラーが発生しました")
+        logger.exception("/trafficコマンドエラー")
         await interaction.followup.send("エラーが発生しました。しばらくしてから再度お試しください。")
 
 @bot.tree.command(name="stats", description="日本空域の管制統計を表示")
@@ -1687,7 +1687,7 @@ async def stats_command(interaction: discord.Interaction, days: int = 7, positio
 
         await interaction.followup.send(embed=embed)
     except Exception as e:
-        logger.exception("エラーが発生しました")
+        logger.exception("/statsコマンドエラー")
         await interaction.followup.send("エラーが発生しました。しばらくしてから再度お試しください。")
 
 # ── MyStats commands ──────────────────────────────────────────────
@@ -1728,7 +1728,7 @@ async def mystats_show(interaction: discord.Interaction):
         embed = build_stats_embed(cid, stats, vatsim_info)
         await interaction.followup.send(embed=embed)
     except Exception as e:
-        logger.exception("エラーが発生しました")
+        logger.exception("/mystats showコマンドエラー")
         await interaction.followup.send("エラーが発生しました。しばらくしてから再度お試しください。")
 
 @mystats_group.command(name="user", description="指定CIDの管制統計を表示")
@@ -1745,7 +1745,7 @@ async def mystats_user(interaction: discord.Interaction, cid: int):
         embed = build_stats_embed(cid, stats, vatsim_info)
         await interaction.followup.send(embed=embed)
     except Exception as e:
-        logger.exception("エラーが発生しました")
+        logger.exception("/mystats userコマンドエラー")
         await interaction.followup.send("エラーが発生しました。しばらくしてから再度お試しください。")
 
 bot.tree.add_command(mystats_group)
