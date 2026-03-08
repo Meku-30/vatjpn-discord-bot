@@ -594,6 +594,7 @@ class VATJPNBot(discord.Client):
                 # 基準と異なる
                 if self.apch_last_notified.get(key) == apch:
                     continue  # 既に通知済み
+                prev_apch = self.apch_last_notified.get(key, "")
                 self.apch_last_notified[key] = apch
 
                 ch_id = apch_get_channel(guild_id)
@@ -605,13 +606,23 @@ class VATJPNBot(discord.Client):
 
                 rwy_in_use = rwy_cache[icao].get("runway_in_use", "")
                 observed = rwy_cache[icao].get("observed_at", "")
-                time_desc = f" ({ts}-{te} UTC)" if ts else ""
-                embed = discord.Embed(
-                    title=f"⚠️ APCH TYPE 変更 — {icao}",
-                    color=0xFF9900,
-                )
-                embed.add_field(name="現在", value=apch, inline=True)
-                embed.add_field(name="基準", value=f"{baseline}{time_desc}", inline=True)
+                is_watch = baseline == "*"
+                if is_watch:
+                    embed = discord.Embed(
+                        title=f"APCH TYPE 更新 — {icao}",
+                        color=0x3498DB,
+                    )
+                    embed.add_field(name="現在", value=apch, inline=True)
+                    if prev_apch:
+                        embed.add_field(name="前回", value=prev_apch, inline=True)
+                else:
+                    time_desc = f" ({ts}-{te} UTC)" if ts else ""
+                    embed = discord.Embed(
+                        title=f"⚠️ APCH TYPE 変更 — {icao}",
+                        color=0xFF9900,
+                    )
+                    embed.add_field(name="現在", value=apch, inline=True)
+                    embed.add_field(name="基準", value=f"{baseline}{time_desc}", inline=True)
                 if rwy_in_use:
                     embed.add_field(name="使用滑走路", value=rwy_in_use, inline=True)
                 if observed:
@@ -623,7 +634,9 @@ class VATJPNBot(discord.Client):
 
     @staticmethod
     def _apch_matches_baseline(approach_type, baseline):
-        """approach_typeがbaselineに合致するかを部分一致で判定する。"""
+        """approach_typeがbaselineに合致するかを部分一致で判定する。'*'は全変化監視（常に不一致）。"""
+        if baseline == "*":
+            return False
         return baseline.upper() in approach_type.upper()
 
     @apch_loop.before_loop
@@ -1641,6 +1654,23 @@ async def apch_setchannel(interaction: discord.Interaction, channel: discord.Tex
     apch_set_channel(interaction.guild_id, channel.id)
     await interaction.response.send_message(f"APCH TYPE変更通知の送信先を {channel.mention} に設定しました。")
 
+@apch_group.command(name="watch", description="空港のAPCH TYPE全変化を監視（基準なし）")
+@app_commands.describe(icao="空港のICAOコード（例: RJTT）")
+async def apch_watch(interaction: discord.Interaction, icao: str):
+    if not apch_get_channel(interaction.guild_id):
+        await interaction.response.send_message(
+            "先に `/apch setchannel` で通知先チャンネルを設定してください。", ephemeral=True)
+        return
+    # 同じ空港にbaseline付きsetが既にある場合はエラー
+    existing = [r for r in apch_list_watches(interaction.guild_id) if r[0] == icao.upper() and r[1] != "*"]
+    if existing:
+        await interaction.response.send_message(
+            f"**{icao.upper()}** には既に基準が登録されています。先に `/apch remove {icao.upper()}` で削除してください。", ephemeral=True)
+        return
+    apch_add_watch(interaction.guild_id, icao, "*", None, None, interaction.user.id)
+    await interaction.response.send_message(
+        f"**{icao.upper()}** のAPCH TYPE全変化を監視します。変更があるたびに通知します。")
+
 @apch_group.command(name="set", description="空港の基準APCH TYPEを登録")
 @app_commands.describe(
     icao="空港のICAOコード（例: RJTT）",
@@ -1660,6 +1690,10 @@ async def apch_set(interaction: discord.Interaction, icao: str, baseline: str, t
                 "時間帯の形式が不正です。`HH:MM-HH:MM`（UTC）で指定してください。例: `22:00-06:00`", ephemeral=True)
             return
         time_start, time_end = parsed
+    # 同じ空港のwatchレコード(baseline="*")があれば自動削除
+    with sqlite3.connect(stats_db_filename) as conn:
+        conn.execute("DELETE FROM apch_watches WHERE guild_id = ? AND icao = ? AND baseline = '*'",
+                     (str(interaction.guild_id), icao.upper()))
     apch_add_watch(interaction.guild_id, icao, baseline, time_start, time_end, interaction.user.id)
     time_desc = f" ({time_start}-{time_end} UTC)" if time_start else " (全時間帯)"
     await interaction.response.send_message(
@@ -1695,7 +1729,10 @@ async def apch_list(interaction: discord.Interaction):
     lines = []
     for icao, baseline, ts, te in watches:
         time_desc = f"({ts}-{te} UTC)" if ts else "(全時間帯)"
-        lines.append(f"**{icao}**: \"{baseline}\" {time_desc}")
+        if baseline == "*":
+            lines.append(f"**{icao}**: 全変化監視 {time_desc}")
+        else:
+            lines.append(f"**{icao}**: \"{baseline}\" {time_desc}")
     if ch_id:
         lines.append(f"\n通知先: <#{ch_id}>")
     embed = discord.Embed(
