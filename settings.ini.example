@@ -13,7 +13,9 @@ data_filename=data.json
 nickname_filename=nicknames.json
 stats_db_filename=stats.db
 
-# NOTAM/ATIS/METAR/PIREP features require SWIM API credentials in environment variables:
+# NOTAM/ATIS/METAR/PIREP/APCH features require SWIM API credentials in environment variables:
 #   SWIM_API_URL=your_swim_api_url
 #   SWIM_API_TOKEN=your_bearer_token
 #   ENABLE_PIREP_NOTIFICATIONS=true  (PIREP turbulence auto-notification, default: true)
+#   PIREP_CHANNEL_ID=123456789       (PIREP notification channel, default: discord_channel_id)
+#   ENABLE_NOTIFICATIONS=true        (login/logout notifications, false = commands-only mode)
