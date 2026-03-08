@@ -18,6 +18,44 @@ swim_api_token = os.environ.get("SWIM_API_TOKEN")
 enable_pirep_notifications = os.environ.get("ENABLE_PIREP_NOTIFICATIONS", "true").lower() in ("true", "1", "yes")
 enable_apch_notifications = os.environ.get("ENABLE_APCH_NOTIFICATIONS", "true").lower() in ("true", "1", "yes")
 
+# ── SWIM API common helper ────────────────────────────────────────
+
+_swim_headers = None
+
+def _get_swim_headers():
+    global _swim_headers
+    if _swim_headers is None and swim_api_token:
+        _swim_headers = {"Authorization": f"Bearer {swim_api_token}"}
+    return _swim_headers
+
+async def _swim_request(http_session, path, label="SWIM", params=None, retries=1):
+    """SWIM APIへの共通リクエスト。5xx/タイムアウト時にリトライ。Returns (json_data, error_msg)."""
+    if not swim_api_url or not swim_api_token:
+        return None, f"{label}機能を使用するにはSWIM_API_URL/SWIM_API_TOKEN環境変数の設定が必要です。"
+    url = f"{swim_api_url}{path}"
+    last_err = None
+    for attempt in range(1 + retries):
+        try:
+            async with http_session.get(url, headers=_get_swim_headers(), params=params) as resp:
+                if resp.status in (401, 403):
+                    return None, "SWIM APIの認証に失敗しました。トークンを確認してください。"
+                if resp.status >= 500 and attempt < retries:
+                    last_err = f"SWIM APIエラー (HTTP {resp.status})"
+                    await asyncio.sleep(2)
+                    continue
+                if resp.status != 200:
+                    return None, f"SWIM APIエラー (HTTP {resp.status})"
+                return await resp.json(), None
+        except asyncio.TimeoutError:
+            last_err = f"{label}情報の取得がタイムアウトしました。"
+            if attempt < retries:
+                await asyncio.sleep(2)
+                continue
+        except Exception:
+            logger.exception("SWIM APIリクエストエラー (%s)", label)
+            return None, f"{label}情報の取得に失敗しました。"
+    return None, last_err
+
 
 class SwimCog(commands.Cog):
     """SWIM非公式API連携機能（ATIS, METAR, NOTAM, PIREP, APCH）"""
