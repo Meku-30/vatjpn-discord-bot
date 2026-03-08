@@ -128,6 +128,20 @@ def init_db():
         cid INTEGER NOT NULL
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_cid ON sessions(cid)")
+    c.execute("""CREATE TABLE IF NOT EXISTS apch_config (
+        guild_id TEXT PRIMARY KEY,
+        channel_id TEXT NOT NULL
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS apch_watches (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id TEXT NOT NULL,
+        icao TEXT NOT NULL,
+        baseline TEXT NOT NULL,
+        time_start TEXT,
+        time_end TEXT,
+        registered_by TEXT NOT NULL
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_apch_watches_guild_icao ON apch_watches(guild_id, icao)")
     conn.commit()
     conn.close()
 
