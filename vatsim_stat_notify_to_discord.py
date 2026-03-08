@@ -774,14 +774,43 @@ async def fetch_active_pireps(http_session):
         return [], "PIREP情報の取得に失敗しました。"
     return pireps or [], None
 
+JAPAN_TRANSITION_FL = 140  # FL140 = 14,000ft
+
+def _fl_to_display(fl_val):
+    """FL値(百ft単位)を日本の遷移高度に基づきFL/ftで表示する。"""
+    if fl_val >= JAPAN_TRANSITION_FL:
+        return f"FL{fl_val:03d}"
+    feet = fl_val * 100
+    return f"{feet:,}ft"
+
 def format_pirep_altitude(pirep):
-    """PIREPの高度を表示用にフォーマットする。"""
+    """PIREPの高度を表示用にフォーマットする。
+    bodyテキストから高度レンジを抽出し、日本の遷移高度(14,000ft/FL140)に基づきFL/ftを使い分ける。
+    """
+    body = pirep.get("body", "")
+
+    # bodyテキストから高度レンジを抽出 (例: /F000-050, /F350)
+    m = re.search(r'/F(\d{3})(?:-(\d{3}))?(?=[\s/]|$)', body)
+    if m:
+        low = int(m.group(1))
+        high = int(m.group(2)) if m.group(2) else None
+        low_str = _fl_to_display(low)
+        if high is not None:
+            high_str = _fl_to_display(high)
+            return f"{low_str} - {high_str}"
+        return low_str
+
+    # フォールバック: APIのaltitudeフィールド
     alt = pirep.get("altitude")
     if not alt:
         return "不明"
     indicator = pirep.get("altitude_indicator", "")
     if indicator == "F":
-        return f"FL{alt}"
+        try:
+            fl_val = int(alt)
+            return _fl_to_display(fl_val)
+        except ValueError:
+            return f"FL{alt}"
     return f"{alt}ft"
 
 def format_pirep_location(pirep):
