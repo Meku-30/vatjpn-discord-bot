@@ -173,7 +173,7 @@ def apch_remove_watch(guild_id, icao, time_start=None, time_end=None):
     with sqlite3.connect(stats_db_filename) as conn:
         if time_start is not None and time_end is not None:
             c = conn.execute(
-                "DELETE FROM apch_watches WHERE guild_id = ? AND icao = ? AND time_start = ? AND time_end = ?",
+                "DELETE FROM apch_watches WHERE guild_id = ? AND icao = ? AND time_start IS ? AND time_end IS ?",
                 (str(guild_id), icao.upper(), time_start, time_end))
         else:
             c = conn.execute(
@@ -201,6 +201,10 @@ def parse_time_range(time_range_str):
     m = re.match(r'^(\d{2}:\d{2})-(\d{2}:\d{2})$', time_range_str)
     if not m:
         return None
+    for part in (m.group(1), m.group(2)):
+        h, mi = map(int, part.split(":"))
+        if h > 23 or mi > 59:
+            return None
     return m.group(1), m.group(2)
 
 def is_in_time_range(time_start, time_end):
