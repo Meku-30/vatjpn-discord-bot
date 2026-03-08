@@ -1,5 +1,8 @@
 # APCH TYPE 変更監視・通知機能 実装計画
 
+> **注意:** この計画は初期実装時のものです。実装完了後にさらなる拡張が行われています。
+> 現在の実装との差分は設計書 (`2026-03-08-apch-type-monitor-design.md`) の冒頭注記を参照。
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** RWY-INFOのAPCH TYPEが基準と異なる場合にDiscordチャンネルへ自動通知する機能を追加する

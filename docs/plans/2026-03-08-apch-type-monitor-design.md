@@ -1,5 +1,15 @@
 # APCH TYPE 変更監視・通知機能 設計書
 
+> **注意:** この設計書は初期設計時点のものです。実装では以下の拡張が追加されています:
+> - `/apch watch` / `unwatch` — 全空港一括監視（`icao="*", baseline="*"`、青色Embed）
+> - 同一空港に複数baseline登録で OR 条件判定
+> - 特定baseline優先、時間帯外はグローバルwatchにフォールバック
+> - `ENABLE_NOTIFICATIONS` から独立（SWIM API設定のみで起動）
+> - 一括 `fetch_all_runway_info()` でAPI呼び出し最小化
+> - ICAOバリデーション（4文字英字チェック）
+> - `/apch remove` で baseline 指定の個別削除対応
+> - SQLite永続接続 (`get_db()`) + JOINでchannel_id取得
+
 ## 概要
 
 空港ごとに「基準となるAPCH TYPE」を登録しておき、RWY-INFOのAPCH TYPEが基準と異なる場合にDiscordチャンネルへ通知する機能。

@@ -25,6 +25,12 @@ VATSIM 日本空域の ATC 管制官のオンライン/オフライン状況を 
 | `/nickname add <cid> <name>` | VATSIM CID にニックネームを登録 |
 | `/nickname remove <cid>` | ニックネームを削除 |
 | `/nickname list` | 登録済みニックネーム一覧 |
+| `/apch setchannel <channel>` | APCH TYPE 変更通知の送信先チャンネルを設定 |
+| `/apch watch` | 全空港の APCH TYPE 変化を一括監視開始 |
+| `/apch unwatch` | 全空港の APCH TYPE 変化監視を停止 |
+| `/apch set <icao> <baseline> [time_range]` | 空港の基準 APCH TYPE を登録（複数登録で OR 条件） |
+| `/apch remove <icao> [baseline]` | 空港の APCH TYPE 監視登録を削除 |
+| `/apch list` | APCH TYPE 監視の登録一覧を表示 |
 
 ## 機能 / Features
 
@@ -39,6 +45,7 @@ VATSIM 日本空域の ATC 管制官のオンライン/オフライン状況を 
 - **PIREP タービュランス通知** - SWIM非公式APIからPIREPを5分間隔で自動取得し、MOD（Moderate）以上のタービュランスを検知した場合に自動通知。`ENABLE_PIREP_NOTIFICATIONS` 環境変数でオン/オフ切り替え可能
 - **空港トラフィック** - ICAO コードで空港を指定し、出発・到着・プリファイル済みフライトを一覧表示
 - **個人管制統計** - Discord ID と VATSIM CID を紐付けて個人の管制統計を表示。VATSIM API から総管制時間・レーティング情報も取得
+- **APCH TYPE 変更監視** - SWIM非公式APIからRWY-INFOを5分間隔で監視。`/apch watch` で全空港の変化を一括監視（青色Embed）、`/apch set` で空港ごとに基準APCH TYPEを登録し逸脱時に通知（オレンジEmbed）。同一空港に複数baselines登録でOR条件判定、時間帯指定、特定baseline優先（時間帯外はグローバルwatchにフォールバック）対応
 
 ## セットアップ / Setup
 
@@ -62,6 +69,12 @@ SWIM_API_TOKEN=your-swim-api-token
 
 # PIREP タービュランス自動通知（デフォルト: true）
 ENABLE_PIREP_NOTIFICATIONS=true
+
+# PIREP 通知先チャンネルID（省略時は discord_channel_id と同じ）
+PIREP_CHANNEL_ID=YOUR_PIREP_CHANNEL_ID
+
+# ログイン/ログアウト通知の有効化（デフォルト: true、false でコマンド専用モード）
+ENABLE_NOTIFICATIONS=true
 ```
 
 ### 2. settings.ini の設定
@@ -100,6 +113,9 @@ services:
       - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
       - SWIM_API_URL=${SWIM_API_URL}
       - SWIM_API_TOKEN=${SWIM_API_TOKEN}
+      - ENABLE_NOTIFICATIONS=${ENABLE_NOTIFICATIONS:-true}
+      - ENABLE_PIREP_NOTIFICATIONS=${ENABLE_PIREP_NOTIFICATIONS:-true}
+      - PIREP_CHANNEL_ID=${PIREP_CHANNEL_ID:-}
     restart: always
 ```
 
