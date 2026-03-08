@@ -11,8 +11,6 @@ import os
 import sys
 import sqlite3
 from datetime import datetime, timezone, timedelta
-import io
-from staticmap import StaticMap, CircleMarker
 
 logging.basicConfig(
     level=logging.INFO,
@@ -23,7 +21,6 @@ logger = logging.getLogger("vatjpn-bot")
 
 # ── Feature flags ────────────────────────────────────────────────
 enable_notifications = os.environ.get("ENABLE_NOTIFICATIONS", "true").lower() in ("true", "1", "yes")
-enable_pirep_notifications = os.environ.get("ENABLE_PIREP_NOTIFICATIONS", "true").lower() in ("true", "1", "yes")
 
 # ── Config validation ──────────────────────────────────────────────
 
@@ -63,7 +60,7 @@ discord_channel_id = int(discord_channel_id_str) if discord_channel_id_str else 
 
 solo_validation_url = config.get("VATSIM_CONFIG", "solo_validation_url", fallback=None)
 
-# ── SWIM API (NOTAM) ─────────────────────────────────────────────
+# ── SWIM API ──────────────────────────────────────────────────────
 swim_api_url = os.environ.get("SWIM_API_URL")
 swim_api_token = os.environ.get("SWIM_API_TOKEN")
 pirep_channel_id = int(os.environ.get("PIREP_CHANNEL_ID", 0)) or discord_channel_id
@@ -367,6 +364,10 @@ class VATJPNBot(discord.Client):
         self.http_session = aiohttp.ClientSession(timeout=timeout)
         if enable_notifications:
             self.polling_loop.start()
+        # SWIM機能はCogとして条件付きロード
+        if swim_api_url and swim_api_token:
+            from cogs.swim import SwimCog
+            await self.add_cog(SwimCog(self))
 
     async def close(self):
         if enable_notifications:
