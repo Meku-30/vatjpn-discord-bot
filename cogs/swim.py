@@ -1022,13 +1022,8 @@ class SwimCog(commands.Cog):
 
     @staticmethod
     def _get_approach_types(rwy):
-        """RWY-INFOからapproach_typesを取得。フォールバック付き。"""
-        types = rwy.get("approach_types")
-        if types:
-            return types
-        # approach_types未対応 (SWIM API更新前) のフォールバック
-        apch = rwy.get("approach_type", "")
-        return [apch] if apch else []
+        """RWY-INFOからapproach_typesを取得する。"""
+        return rwy.get("approach_types") or []
 
     @staticmethod
     def _apch_matches_baseline(approach_type, baseline):
