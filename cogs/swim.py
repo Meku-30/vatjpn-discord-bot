@@ -938,9 +938,8 @@ class SwimCog(commands.Cog):
 
                         if applicable:
                             if any(
-                                self._apch_matches_baseline(a, bl)
+                                self._baseline_matches_approaches(bl, approach_types)
                                 for bl, _, _ in applicable
-                                for a in approach_types
                             ):
                                 self.apch_last_notified.pop(key, None)
                                 continue
@@ -1026,6 +1025,23 @@ class SwimCog(commands.Cog):
         if baseline == "*":
             return False
         return baseline.upper() in approach_type.upper()
+
+    @staticmethod
+    def _baseline_matches_approaches(baseline, approach_types):
+        """baselineがapproach_typesリスト全体に合致するか判定する。
+        '+' 区切りのセット条件: 全サブ条件がそれぞれapproach_types内のいずれかに部分一致すればTrue。
+        単一条件: approach_types内のいずれかに部分一致すればTrue。
+        '*'は常にFalse（全変化監視）。
+        """
+        if baseline == "*":
+            return False
+        if "+" in baseline:
+            sub_baselines = [s.strip() for s in baseline.split("+")]
+            return all(
+                any(sb.upper() in a.upper() for a in approach_types)
+                for sb in sub_baselines
+            )
+        return any(baseline.upper() in a.upper() for a in approach_types)
 
     @apch_loop.before_loop
     async def before_apch_loop(self):
