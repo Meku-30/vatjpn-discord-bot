@@ -590,38 +590,7 @@ class SwimCog(commands.Cog):
                 await interaction.followup.send(error)
                 return
             if not atis:
-                metar, rwy = await asyncio.gather(
-                    fetch_metar(self.bot.http_session, icao_input),
-                    fetch_runway_info(self.bot.http_session, icao_input),
-                )
-                metar_data, metar_err = metar
-                rwy_data, rwy_err = rwy
-
-                parts = []
-                if metar_data:
-                    parts.append(f"**METAR:**\n{metar_data.get('raw_text', '')}")
-                if rwy_data:
-                    approach_types = self._get_approach_types(rwy_data)
-                    rwy_in_use = rwy_data.get("runway_in_use")
-                    if approach_types:
-                        parts.append(f"**APCH TYPE:** {approach_types[0]}" if len(approach_types) == 1
-                                     else "**APCH TYPE:**\n" + "\n".join(approach_types))
-                    if rwy_in_use:
-                        parts.append(f"**USING RWY:** {rwy_in_use}")
-
-                if not parts:
-                    await interaction.followup.send(f"**{icao_input}** のATIS・RWY-INFOデータがありません。")
-                    return
-
-                description = "\n\n".join(parts)
-                if len(description) > 4096:
-                    description = description[:4093] + "..."
-                embed = discord.Embed(
-                    title=f"{icao_input} RWY-INFO",
-                    color=0x00bfff,
-                    description=description,
-                )
-                await interaction.followup.send(embed=embed)
+                await interaction.followup.send(f"**{icao_input}** のATISデータがありません。RWY-INFOは `/rwy {icao_input}` で確認できます。")
                 return
 
             atis_letter = atis.get("atis_letter")
@@ -673,6 +642,48 @@ class SwimCog(commands.Cog):
             await interaction.followup.send(embed=embed)
         except Exception:
             logger.exception("/metarコマンドエラー")
+            await interaction.followup.send("エラーが発生しました。しばらくしてから再度お試しください。")
+
+    @app_commands.command(name="rwy", description="空港のRWY-INFO（APCH TYPE・使用滑走路）とMETARを表示")
+    @app_commands.describe(icao="空港のICAOコード（例: RJTT）")
+    async def rwy_command(self, interaction: discord.Interaction, icao: str):
+        await interaction.response.defer()
+        try:
+            icao_input = icao.strip().upper()
+            metar, rwy = await asyncio.gather(
+                fetch_metar(self.bot.http_session, icao_input),
+                fetch_runway_info(self.bot.http_session, icao_input),
+            )
+            metar_data, metar_err = metar
+            rwy_data, rwy_err = rwy
+
+            parts = []
+            if metar_data:
+                parts.append(f"**METAR:**\n{metar_data.get('raw_text', '')}")
+            if rwy_data:
+                approach_types = self._get_approach_types(rwy_data)
+                rwy_in_use = rwy_data.get("runway_in_use")
+                if approach_types:
+                    parts.append(f"**APCH TYPE:** {approach_types[0]}" if len(approach_types) == 1
+                                 else "**APCH TYPE:**\n" + "\n".join(approach_types))
+                if rwy_in_use:
+                    parts.append(f"**USING RWY:** {rwy_in_use}")
+
+            if not parts:
+                await interaction.followup.send(f"**{icao_input}** のRWY-INFO・METARデータがありません。")
+                return
+
+            description = "\n\n".join(parts)
+            if len(description) > 4096:
+                description = description[:4093] + "..."
+            embed = discord.Embed(
+                title=f"{icao_input} RWY-INFO",
+                color=0x00bfff,
+                description=description,
+            )
+            await interaction.followup.send(embed=embed)
+        except Exception:
+            logger.exception("/rwyコマンドエラー")
             await interaction.followup.send("エラーが発生しました。しばらくしてから再度お試しください。")
 
     # ── APCH コマンドグループ ──
