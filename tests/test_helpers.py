@@ -256,3 +256,10 @@ class TestApchMatchesBaseline:
         """watchモード ('*') は常にFalse（全変化を通知）"""
         assert SwimCog._apch_matches_baseline("ILS Y RWY34L", "*") is False
         assert SwimCog._apch_matches_baseline("RNAV RWY22", "*") is False
+
+    def test_multi_approach_any_match(self):
+        """approach_types配列のいずれかにマッチすればTrue"""
+        approach_types = ["ILS X RWY34L", "HIGHWAY VISUAL RWY34R"]
+        assert any(SwimCog._apch_matches_baseline(a, "ILS") for a in approach_types) is True
+        assert any(SwimCog._apch_matches_baseline(a, "VISUAL") for a in approach_types) is True
+        assert any(SwimCog._apch_matches_baseline(a, "RNAV") for a in approach_types) is False
