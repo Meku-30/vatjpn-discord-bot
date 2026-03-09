@@ -106,6 +106,11 @@ def init_db():
         registered_by TEXT NOT NULL
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_apch_watches_guild_icao ON apch_watches(guild_id, icao)")
+    # マイグレーション: rwyカラム追加（既存DBとの互換性）
+    try:
+        c.execute("ALTER TABLE apch_watches ADD COLUMN rwy TEXT")
+    except sqlite3.OperationalError:
+        pass  # カラムが既に存在する場合
     _db_conn.commit()
 
 _db_conn = None

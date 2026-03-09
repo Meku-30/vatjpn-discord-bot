@@ -70,25 +70,25 @@ def apch_get_channel(guild_id):
                           (str(guild_id),)).fetchone()
     return int(row[0]) if row else None
 
-def apch_add_watch(guild_id, icao, baseline, time_start, time_end, registered_by):
+def apch_add_watch(guild_id, icao, baseline, time_start, time_end, registered_by, rwy=None):
     conn = get_db()
     with conn:
-        # 同じguild+icao+baseline+時間帯の既存レコードを削除してから挿入（重複防止、異なるbaselineは共存）
+        # 同じguild+icao+baseline+時間帯+rwyの既存レコードを削除してから挿入（重複防止、異なるbaselineは共存）
         conn.execute(
-            "DELETE FROM apch_watches WHERE guild_id = ? AND icao = ? AND baseline = ? AND time_start IS ? AND time_end IS ?",
-            (str(guild_id), icao.upper(), baseline, time_start, time_end))
+            "DELETE FROM apch_watches WHERE guild_id = ? AND icao = ? AND baseline = ? AND time_start IS ? AND time_end IS ? AND rwy IS ?",
+            (str(guild_id), icao.upper(), baseline, time_start, time_end, rwy))
         conn.execute(
-            "INSERT INTO apch_watches (guild_id, icao, baseline, time_start, time_end, registered_by) VALUES (?, ?, ?, ?, ?, ?)",
-            (str(guild_id), icao.upper(), baseline, time_start, time_end, str(registered_by)))
+            "INSERT INTO apch_watches (guild_id, icao, baseline, time_start, time_end, registered_by, rwy) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (str(guild_id), icao.upper(), baseline, time_start, time_end, str(registered_by), rwy))
 
-def apch_remove_watch(guild_id, icao, baseline=None, time_start=None, time_end=None):
-    """登録を削除。baseline/time指定で絞り込み可。削除件数を返す。"""
+def apch_remove_watch(guild_id, icao, baseline=None, time_start=None, time_end=None, rwy=None):
+    """登録を削除。baseline/time/rwy指定で絞り込み可。削除件数を返す。"""
     conn = get_db()
     with conn:
         if baseline is not None:
             c = conn.execute(
-                "DELETE FROM apch_watches WHERE guild_id = ? AND icao = ? AND baseline = ? AND time_start IS ? AND time_end IS ?",
-                (str(guild_id), icao.upper(), baseline, time_start, time_end))
+                "DELETE FROM apch_watches WHERE guild_id = ? AND icao = ? AND baseline = ? AND time_start IS ? AND time_end IS ? AND rwy IS ?",
+                (str(guild_id), icao.upper(), baseline, time_start, time_end, rwy))
         elif time_start is not None and time_end is not None:
             c = conn.execute(
                 "DELETE FROM apch_watches WHERE guild_id = ? AND icao = ? AND time_start IS ? AND time_end IS ?",
@@ -103,7 +103,7 @@ def apch_list_watches(guild_id):
     conn = get_db()
     with conn:
         rows = conn.execute(
-            "SELECT icao, baseline, time_start, time_end FROM apch_watches WHERE guild_id = ? ORDER BY icao, time_start",
+            "SELECT icao, baseline, time_start, time_end, rwy FROM apch_watches WHERE guild_id = ? ORDER BY icao, time_start",
             (str(guild_id),)).fetchall()
     return rows
 
@@ -112,7 +112,7 @@ def apch_get_all_watches():
     conn = get_db()
     with conn:
         rows = conn.execute(
-            "SELECT w.guild_id, w.icao, w.baseline, w.time_start, w.time_end, c.channel_id "
+            "SELECT w.guild_id, w.icao, w.baseline, w.time_start, w.time_end, c.channel_id, w.rwy "
             "FROM apch_watches w LEFT JOIN apch_config c ON w.guild_id = c.guild_id "
             "ORDER BY w.guild_id, w.icao"
         ).fetchall()
@@ -724,9 +724,10 @@ class SwimCog(commands.Cog):
     @app_commands.describe(
         icao="空港のICAOコード（例: RJTT）",
         baseline="基準APCH TYPE（例: ILS, ILS Y RWY34L）",
-        time_range="適用時間帯 HH:MM-HH:MM UTC（省略時は全時間帯）"
+        time_range="適用時間帯 HH:MM-HH:MM UTC（省略時は全時間帯）",
+        rwy="使用滑走路条件（例: 07, 34R）— VISUAL等の滑走路名なしAPCH TYPEで滑走路を区別する場合に指定",
     )
-    async def apch_set(self, interaction: discord.Interaction, icao: str, baseline: str, time_range: str = None):
+    async def apch_set(self, interaction: discord.Interaction, icao: str, baseline: str, time_range: str = None, rwy: str = None):
         if not re.match(r'^[A-Z]{4}$', icao.upper()):
             await interaction.response.send_message(
                 "ICAOコードは4文字の英字で指定してください（例: RJTT）。", ephemeral=True)
@@ -743,18 +744,21 @@ class SwimCog(commands.Cog):
                     "時間帯の形式が不正です。`HH:MM-HH:MM`（UTC）で指定してください。例: `22:00-06:00`", ephemeral=True)
                 return
             time_start, time_end = parsed
-        apch_add_watch(interaction.guild_id, icao, baseline, time_start, time_end, interaction.user.id)
+        rwy_normalized = rwy.strip().upper() if rwy else None
+        apch_add_watch(interaction.guild_id, icao, baseline, time_start, time_end, interaction.user.id, rwy=rwy_normalized)
         time_desc = f" ({time_start}-{time_end} UTC)" if time_start else " (全時間帯)"
+        rwy_desc = f" (RWY {rwy_normalized})" if rwy_normalized else ""
         await interaction.response.send_message(
-            f"**{icao.upper()}** の基準APCH TYPEを「{baseline}」に設定しました。{time_desc}")
+            f"**{icao.upper()}** の基準APCH TYPEを「{baseline}」に設定しました。{rwy_desc}{time_desc}")
 
     @apch_group.command(name="remove", description="空港のAPCH TYPE監視登録を削除")
     @app_commands.describe(
         icao="空港のICAOコード（例: RJTT）",
         baseline="削除する基準APCH TYPE（省略時はその空港の全登録を削除）",
-        time_range="削除する時間帯 HH:MM-HH:MM UTC（省略時は全時間帯）"
+        time_range="削除する時間帯 HH:MM-HH:MM UTC（省略時は全時間帯）",
+        rwy="削除する使用滑走路条件（例: 07, 34R）",
     )
-    async def apch_remove(self, interaction: discord.Interaction, icao: str, baseline: str = None, time_range: str = None):
+    async def apch_remove(self, interaction: discord.Interaction, icao: str, baseline: str = None, time_range: str = None, rwy: str = None):
         if not re.match(r'^[A-Z]{4}$', icao.upper()):
             await interaction.response.send_message(
                 "ICAOコードは4文字の英字で指定してください（例: RJTT）。", ephemeral=True)
@@ -767,7 +771,8 @@ class SwimCog(commands.Cog):
                     "時間帯の形式が不正です。`HH:MM-HH:MM`（UTC）で指定してください。", ephemeral=True)
                 return
             time_start, time_end = parsed
-        count = apch_remove_watch(interaction.guild_id, icao, baseline=baseline, time_start=time_start, time_end=time_end)
+        rwy_normalized = rwy.strip().upper() if rwy else None
+        count = apch_remove_watch(interaction.guild_id, icao, baseline=baseline, time_start=time_start, time_end=time_end, rwy=rwy_normalized)
         if count > 0:
             await interaction.response.send_message(f"**{icao.upper()}** の監視登録を{count}件削除しました。")
         else:
@@ -784,18 +789,19 @@ class SwimCog(commands.Cog):
         has_global = False
         # 空港別にグルーピングして表示
         airport_baselines = {}
-        for icao, baseline, ts, te in watches:
+        for icao, baseline, ts, te, rwy in watches:
             if icao == "*":
                 has_global = True
                 continue
-            airport_baselines.setdefault(icao, []).append((baseline, ts, te))
+            airport_baselines.setdefault(icao, []).append((baseline, ts, te, rwy))
         if has_global:
             lines.append("🌐 **全空港変化監視: ON**")
         for icao in sorted(airport_baselines.keys()):
             bl_parts = []
-            for baseline, ts, te in airport_baselines[icao]:
+            for baseline, ts, te, rwy in airport_baselines[icao]:
                 time_desc = f" ({ts}-{te} UTC)" if ts else ""
-                bl_parts.append(f"\"{baseline}\"{time_desc}")
+                rwy_desc = f" (RWY {rwy})" if rwy else ""
+                bl_parts.append(f"\"{baseline}\"{rwy_desc}{time_desc}")
             lines.append(f"**{icao}**: {' / '.join(bl_parts)}")
         if ch_id:
             lines.append(f"\n通知先: <#{ch_id}>")
@@ -862,15 +868,15 @@ class SwimCog(commands.Cog):
 
             # グローバルwatch (icao="*") の有無と、空港別baseline登録を分類
             guilds_with_global = set()
-            guild_watches = {}  # guild_id → {icao: [(baseline, ts, te), ...]}
+            guild_watches = {}  # guild_id → {icao: [(baseline, ts, te, rwy), ...]}
             guild_channels = {}  # guild_id → channel_id
-            for guild_id, icao, baseline, ts, te, channel_id in all_watches:
+            for guild_id, icao, baseline, ts, te, channel_id, rwy in all_watches:
                 if channel_id:
                     guild_channels[guild_id] = int(channel_id)
                 if icao == "*":
                     guilds_with_global.add(guild_id)
                 else:
-                    guild_watches.setdefault(guild_id, {}).setdefault(icao, []).append((baseline, ts, te))
+                    guild_watches.setdefault(guild_id, {}).setdefault(icao, []).append((baseline, ts, te, rwy))
 
             # キャッシュクリーンアップ
             active_specific_keys = set()
@@ -908,28 +914,29 @@ class SwimCog(commands.Cog):
 
             if self._apch_first_run:
                 self._apch_first_run = False
-                for icao, rwy in rwy_cache.items():
-                    approach_types = self._get_approach_types(rwy)
+                for icao, rwy_data in rwy_cache.items():
+                    approach_types = self._get_approach_types(rwy_data)
                     if not approach_types:
                         continue
-                    apch_tuple = tuple(approach_types)
+                    rwy_in_use = rwy_data.get("runway_in_use", "")
+                    cache_key_val = (tuple(approach_types), rwy_in_use)
                     for gid in guilds_with_global:
-                        self.apch_last_notified[(gid, icao)] = apch_tuple
+                        self.apch_last_notified[(gid, icao)] = cache_key_val
                     for gid, airports in guild_watches.items():
                         if icao in airports:
-                            self.apch_last_notified[(gid, icao)] = apch_tuple
+                            self.apch_last_notified[(gid, icao)] = cache_key_val
                 logger.info("APCH TYPE監視開始（%d空港）", len(rwy_cache))
                 return
 
             # 通常ポーリング: 各空港 × 各ギルド を処理
             all_guild_ids = set(guild_watches.keys()) | guilds_with_global
-            for icao, rwy in rwy_cache.items():
-                approach_types = self._get_approach_types(rwy)
+            for icao, rwy_data in rwy_cache.items():
+                approach_types = self._get_approach_types(rwy_data)
                 if not approach_types:
                     continue
-                apch_tuple = tuple(approach_types)
-                rwy_in_use = rwy.get("runway_in_use", "")
-                observed = rwy.get("observed_at", "")
+                rwy_in_use = rwy_data.get("runway_in_use", "")
+                cache_key_val = (tuple(approach_types), rwy_in_use)
+                observed = rwy_data.get("observed_at", "")
 
                 for guild_id in all_guild_ids:
                     has_specific = guild_id in guild_watches and icao in guild_watches[guild_id]
@@ -942,22 +949,22 @@ class SwimCog(commands.Cog):
                     if has_specific:
                         # 基準登録あり: 適用時間帯のbaselineをOR判定
                         applicable = []
-                        for bl, ts, te in guild_watches[guild_id][icao]:
+                        for bl, ts, te, bl_rwy in guild_watches[guild_id][icao]:
                             if ts and te and not is_in_time_range(ts, te):
                                 continue
-                            applicable.append((bl, ts, te))
+                            applicable.append((bl, ts, te, bl_rwy))
 
                         if applicable:
                             if any(
-                                self._baseline_matches_approaches(bl, approach_types)
-                                for bl, _, _ in applicable
+                                self._baseline_matches_approaches(bl, approach_types, rwy=bl_rwy, runway_in_use=rwy_in_use)
+                                for bl, _, _, bl_rwy in applicable
                             ):
                                 self.apch_last_notified.pop(key, None)
                                 continue
                             # どのbaselineにも一致しない → 通知
-                            if self.apch_last_notified.get(key) == apch_tuple:
+                            if self.apch_last_notified.get(key) == cache_key_val:
                                 continue
-                            self.apch_last_notified[key] = apch_tuple
+                            self.apch_last_notified[key] = cache_key_val
 
                             ch_id = guild_channels.get(guild_id)
                             if not ch_id:
@@ -967,9 +974,10 @@ class SwimCog(commands.Cog):
                                 continue
 
                             bl_strs = []
-                            for bl, ts, te in applicable:
+                            for bl, ts, te, bl_rwy in applicable:
                                 td = f" ({ts}-{te} UTC)" if ts else ""
-                                bl_strs.append(f"{bl}{td}")
+                                rd = f" (RWY {bl_rwy})" if bl_rwy else ""
+                                bl_strs.append(f"{bl}{rd}{td}")
                             embed = discord.Embed(
                                 title=f"⚠️ APCH TYPE 変更 — {icao}",
                                 color=0xFF9900,
@@ -988,10 +996,10 @@ class SwimCog(commands.Cog):
                             continue
                     if has_global:
                         # グローバルwatch: 変化検知のみ
-                        if self.apch_last_notified.get(key) == apch_tuple:
+                        if self.apch_last_notified.get(key) == cache_key_val:
                             continue
                         prev = self.apch_last_notified.get(key)
-                        self.apch_last_notified[key] = apch_tuple
+                        self.apch_last_notified[key] = cache_key_val
                         if not prev:
                             continue  # 初回観測はキャッシュのみ
 
@@ -1011,7 +1019,10 @@ class SwimCog(commands.Cog):
                             apch_display += f"\nRWY: {rwy_in_use}"
                         embed.add_field(name="現在", value=apch_display, inline=True)
                         if prev:
-                            prev_display = "\n".join(prev) if isinstance(prev, tuple) else str(prev)
+                            prev_apch, prev_rwy = prev if isinstance(prev, tuple) and len(prev) == 2 and isinstance(prev[0], tuple) else (prev, "")
+                            prev_display = "\n".join(prev_apch) if isinstance(prev_apch, tuple) else str(prev_apch)
+                            if prev_rwy:
+                                prev_display += f"\nRWY: {prev_rwy}"
                             embed.add_field(name="前回", value=prev_display, inline=True)
                         if observed:
                             embed.set_footer(text=f"観測: {observed[:10]} {observed[11:16]}Z")
@@ -1033,21 +1044,39 @@ class SwimCog(commands.Cog):
         return baseline.upper() in approach_type.upper()
 
     @staticmethod
-    def _baseline_matches_approaches(baseline, approach_types):
+    def _parse_runway_in_use(runway_in_use):
+        """runway_in_useフィールドを個別滑走路のリストに分解する。
+        例: 'RWY 16L/16R' → ['16L', '16R'], 'RWY 07' → ['07']
+        """
+        if not runway_in_use:
+            return []
+        stripped = re.sub(r'^RWY\s*', '', runway_in_use.strip(), flags=re.IGNORECASE)
+        return [r.strip().upper() for r in stripped.split("/") if r.strip()]
+
+    @staticmethod
+    def _baseline_matches_approaches(baseline, approach_types, rwy=None, runway_in_use=None):
         """baselineがapproach_typesリスト全体に合致するか判定する。
         '+' 区切りのセット条件: 全サブ条件がそれぞれapproach_types内のいずれかに部分一致すればTrue。
         単一条件: approach_types内のいずれかに部分一致すればTrue。
         '*'は常にFalse（全変化監視）。
+        rwy指定時: approach_types一致に加え、runway_in_use内の個別滑走路と完全一致も必要。
         """
         if baseline == "*":
             return False
         if "+" in baseline:
             sub_baselines = [s.strip() for s in baseline.split("+")]
-            return all(
+            apch_match = all(
                 any(sb.upper() in a.upper() for a in approach_types)
                 for sb in sub_baselines
             )
-        return any(baseline.upper() in a.upper() for a in approach_types)
+        else:
+            apch_match = any(baseline.upper() in a.upper() for a in approach_types)
+        if not apch_match:
+            return False
+        if rwy:
+            runways = SwimCog._parse_runway_in_use(runway_in_use)
+            return rwy.upper() in runways
+        return True
 
     @apch_loop.before_loop
     async def before_apch_loop(self):

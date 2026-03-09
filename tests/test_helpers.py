@@ -319,6 +319,75 @@ class TestBaselineMatchesApproaches:
         # どちらにもマッチしない
         assert any(SwimCog._baseline_matches_approaches(bl, approaches_none) for bl in baselines) is False
 
+    def test_rwy_match(self):
+        """rwy条件: approach_types一致 + runway_in_use一致"""
+        assert SwimCog._baseline_matches_approaches(
+            "VISUAL", ["VISUAL"], rwy="07", runway_in_use="RWY 07") is True
+
+    def test_rwy_no_match(self):
+        """rwy条件: approach_types一致 + runway_in_use不一致 → False"""
+        assert SwimCog._baseline_matches_approaches(
+            "VISUAL", ["VISUAL"], rwy="07", runway_in_use="RWY 25") is False
+
+    def test_rwy_multi_runway(self):
+        """rwy条件: 複数滑走路の一つに一致"""
+        assert SwimCog._baseline_matches_approaches(
+            "VISUAL", ["VISUAL"], rwy="16L", runway_in_use="RWY 16L/16R") is True
+
+    def test_rwy_multi_runway_no_match(self):
+        """rwy条件: 複数滑走路のどれにも不一致"""
+        assert SwimCog._baseline_matches_approaches(
+            "VISUAL", ["VISUAL"], rwy="34R", runway_in_use="RWY 16L/16R") is False
+
+    def test_rwy_strict_match(self):
+        """rwy条件: 16と16Lは別物（厳密一致）"""
+        assert SwimCog._baseline_matches_approaches(
+            "VISUAL", ["VISUAL"], rwy="16", runway_in_use="RWY 16L") is False
+
+    def test_rwy_none_ignores_runway(self):
+        """rwy=None: runway_in_useを無視（既存動作）"""
+        assert SwimCog._baseline_matches_approaches(
+            "VISUAL", ["VISUAL"], rwy=None, runway_in_use="RWY 25") is True
+
+    def test_rwy_approach_no_match(self):
+        """rwy条件: approach_types不一致なら rwy一致でもFalse"""
+        assert SwimCog._baseline_matches_approaches(
+            "ILS", ["VISUAL"], rwy="07", runway_in_use="RWY 07") is False
+
+    def test_rwy_case_insensitive(self):
+        """rwy条件: 大文字小文字は無関係"""
+        assert SwimCog._baseline_matches_approaches(
+            "VISUAL", ["VISUAL"], rwy="34r", runway_in_use="RWY 34R") is True
+
+    def test_rwy_with_set_baseline(self):
+        """rwy条件 + セット条件の組み合わせ"""
+        assert SwimCog._baseline_matches_approaches(
+            "ILS + VISUAL", ["ILS RWY07", "VISUAL"], rwy="07", runway_in_use="RWY 07") is True
+        assert SwimCog._baseline_matches_approaches(
+            "ILS + VISUAL", ["ILS RWY07", "VISUAL"], rwy="07", runway_in_use="RWY 25") is False
+
+
+# ── _parse_runway_in_use ──────────────────────────────────────
+
+class TestParseRunwayInUse:
+    def test_single_runway(self):
+        assert SwimCog._parse_runway_in_use("RWY 07") == ["07"]
+
+    def test_single_runway_with_side(self):
+        assert SwimCog._parse_runway_in_use("RWY 34R") == ["34R"]
+
+    def test_dual_runway(self):
+        assert SwimCog._parse_runway_in_use("RWY 16L/16R") == ["16L", "16R"]
+
+    def test_mixed_runway(self):
+        assert SwimCog._parse_runway_in_use("RWY 34L/34R") == ["34L", "34R"]
+
+    def test_empty(self):
+        assert SwimCog._parse_runway_in_use("") == []
+
+    def test_none(self):
+        assert SwimCog._parse_runway_in_use(None) == []
+
 
 # ── _get_approach_types ─────────────────────────────────────────
 
