@@ -87,6 +87,40 @@ class TestApchWatch:
         watches = apch_list_watches("g7")
         assert any(w[0] == "*" and w[1] == "*" for w in watches)
 
+    def test_add_with_rwy(self):
+        """rwy条件付きの登録"""
+        apch_add_watch("g8", "RJFT", "VISUAL", None, None, "user1", rwy="07")
+        watches = apch_list_watches("g8")
+        assert len(watches) == 1
+        assert watches[0][0] == "RJFT"
+        assert watches[0][1] == "VISUAL"
+        assert watches[0][4] == "07"  # rwyは5番目 (index 4)
+
+    def test_add_with_rwy_none(self):
+        """rwy=Noneの登録（既存互換）"""
+        apch_add_watch("g9", "RJFT", "VISUAL", None, None, "user1", rwy=None)
+        watches = apch_list_watches("g9")
+        assert len(watches) == 1
+        assert watches[0][4] is None
+
+    def test_rwy_coexists(self):
+        """同じbaseline + 異なるrwyは共存"""
+        apch_add_watch("g10", "RJFT", "VISUAL", None, None, "user1", rwy="07")
+        apch_add_watch("g10", "RJFT", "VISUAL", None, None, "user1", rwy="25")
+        watches = apch_list_watches("g10")
+        rjft = [w for w in watches if w[0] == "RJFT"]
+        assert len(rjft) == 2
+
+    def test_remove_with_rwy(self):
+        """rwy条件付き削除"""
+        apch_add_watch("g11", "RJFT", "VISUAL", None, None, "user1", rwy="07")
+        apch_add_watch("g11", "RJFT", "VISUAL", None, None, "user1", rwy="25")
+        count = apch_remove_watch("g11", "RJFT", baseline="VISUAL", rwy="07")
+        assert count == 1
+        remaining = [w for w in apch_list_watches("g11") if w[0] == "RJFT"]
+        assert len(remaining) == 1
+        assert remaining[0][4] == "25"
+
 
 class TestApchGetAllWatches:
     def test_returns_channel_id(self):
@@ -98,6 +132,16 @@ class TestApchGetAllWatches:
         assert len(gall_rows) >= 1
         # channel_id は6番目のカラム (index 5)
         assert gall_rows[0][5] == "999"
+
+    def test_returns_rwy(self):
+        """JOINでrwyが取得される"""
+        apch_set_channel("grwy", "888")
+        apch_add_watch("grwy", "RJFT", "VISUAL", None, None, "user1", rwy="07")
+        rows = apch_get_all_watches()
+        grwy_rows = [r for r in rows if r[0] == "grwy"]
+        assert len(grwy_rows) >= 1
+        # rwyは7番目のカラム (index 6)
+        assert grwy_rows[0][6] == "07"
 
 
 class TestSessionLogging:
