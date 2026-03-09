@@ -644,7 +644,7 @@ class SwimCog(commands.Cog):
             logger.exception("/metarコマンドエラー")
             await interaction.followup.send("エラーが発生しました。しばらくしてから再度お試しください。")
 
-    @app_commands.command(name="rwy", description="空港のRWY-INFO（APCH TYPE・使用滑走路）とMETARを表示")
+    @app_commands.command(name="rwy", description="空港のRWY-INFO（APCH TYPE・DEP/LDG RWY）とMETARを表示")
     @app_commands.describe(icao="空港のICAOコード（例: RJTT）")
     async def rwy_command(self, interaction: discord.Interaction, icao: str):
         await interaction.response.defer()
@@ -662,12 +662,15 @@ class SwimCog(commands.Cog):
                 parts.append(f"**METAR:**\n{metar_data.get('raw_text', '')}")
             if rwy_data:
                 approach_types = self._get_approach_types(rwy_data)
-                rwy_in_use = rwy_data.get("runway_in_use")
+                dep_rwy = rwy_data.get("dep_rwy")
+                ldg_rwy = rwy_data.get("ldg_rwy")
                 if approach_types:
                     parts.append(f"**APCH TYPE:** {approach_types[0]}" if len(approach_types) == 1
                                  else "**APCH TYPE:**\n" + "\n".join(approach_types))
-                if rwy_in_use:
-                    parts.append(f"**USING RWY:** {rwy_in_use}")
+                if dep_rwy:
+                    parts.append(f"**DEP RWY:** {dep_rwy}")
+                if ldg_rwy:
+                    parts.append(f"**LDG RWY:** {ldg_rwy}")
 
             if not parts:
                 await interaction.followup.send(f"**{icao_input}** のRWY-INFO・METARデータがありません。")
