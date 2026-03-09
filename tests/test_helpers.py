@@ -263,3 +263,31 @@ class TestApchMatchesBaseline:
         assert any(SwimCog._apch_matches_baseline(a, "ILS") for a in approach_types) is True
         assert any(SwimCog._apch_matches_baseline(a, "VISUAL") for a in approach_types) is True
         assert any(SwimCog._apch_matches_baseline(a, "RNAV") for a in approach_types) is False
+
+
+# ── _get_approach_types ─────────────────────────────────────────
+
+class TestGetApproachTypes:
+    def test_approach_types_present(self):
+        """approach_types配列がある場合はそのまま返す"""
+        rwy = {"approach_types": ["ILS X RWY34L", "HIGHWAY VISUAL RWY34R"], "approach_type": "ILS X RWY34L"}
+        assert SwimCog._get_approach_types(rwy) == ["ILS X RWY34L", "HIGHWAY VISUAL RWY34R"]
+
+    def test_fallback_to_approach_type(self):
+        """approach_typesがNoneの場合、approach_typeから1要素リストを返す"""
+        rwy = {"approach_types": None, "approach_type": "ILS Z RWY18"}
+        assert SwimCog._get_approach_types(rwy) == ["ILS Z RWY18"]
+
+    def test_approach_types_empty_list(self):
+        """approach_typesが空リストの場合、approach_typeにフォールバック"""
+        rwy = {"approach_types": [], "approach_type": "RNP RWY16L"}
+        assert SwimCog._get_approach_types(rwy) == ["RNP RWY16L"]
+
+    def test_no_fields(self):
+        """両方ない場合は空リスト"""
+        assert SwimCog._get_approach_types({}) == []
+
+    def test_approach_type_only(self):
+        """approach_typesキー自体がない場合"""
+        rwy = {"approach_type": "VISUAL RWY32"}
+        assert SwimCog._get_approach_types(rwy) == ["VISUAL RWY32"]
