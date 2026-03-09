@@ -547,6 +547,68 @@ async def get_discord_embed(connect_type, atc_info, current_list, http_session=N
 
 # ── Slash commands ─────────────────────────────────────────────────
 
+@bot.tree.command(name="help", description="コマンド一覧とBotの使い方を表示")
+async def help_command(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="コマンド一覧",
+        color=0x00bfff,
+    )
+    embed.add_field(
+        name="VATSIM 情報",
+        value=(
+            "`/online` — オンライン管制官一覧\n"
+            "`/sup` — Supervisor一覧\n"
+            "`/traffic <ICAO>` — 空港の発着トラフィック\n"
+            "`/stats [期間] [ポジション]` — 管制統計"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="個人統計",
+        value=(
+            "`/mystats link <CID>` — CIDを紐付け\n"
+            "`/mystats unlink` — 紐付け解除\n"
+            "`/mystats show [期間]` — 自分の統計\n"
+            "`/mystats user <CID> [期間]` — 指定CIDの統計"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="ニックネーム",
+        value=(
+            "`/nickname add <CID> <名前>` — ニックネーム登録\n"
+            "`/nickname remove <CID>` — 削除\n"
+            "`/nickname list` — 一覧"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="航空情報 (SWIM)",
+        value=(
+            "`/atis [ICAO]` — ATIS表示（省略で全空港一覧）\n"
+            "`/rwy <ICAO>` — RWY-INFO + METAR\n"
+            "`/metar <ICAO>` — METAR\n"
+            "`/notam <ICAO>` — NOTAM"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="APCH TYPE 監視",
+        value=(
+            "`/apch setchannel <#ch>` — 通知先チャンネル設定\n"
+            "`/apch watch` — 全空港の変化を監視\n"
+            "`/apch unwatch` — 全空港監視を停止\n"
+            "`/apch set <ICAO> <baseline> [時間帯]` — 基準登録\n"
+            "　例: `/apch set RJTT ILS X RWY34L 22:00-10:00`\n"
+            "　セット条件: `ILS X RWY34L + HIGHWAY VISUAL RWY34R`\n"
+            "`/apch remove <ICAO> [baseline] [時間帯]` — 削除\n"
+            "`/apch list` — 登録一覧"
+        ),
+        inline=False,
+    )
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
 @bot.tree.command(name="online", description="日本空域のオンライン管制官を表示")
 async def online_command(interaction: discord.Interaction):
     await interaction.response.defer()
