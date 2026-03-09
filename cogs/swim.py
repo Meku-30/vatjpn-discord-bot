@@ -897,23 +897,25 @@ class SwimCog(commands.Cog):
             if self._apch_first_run:
                 self._apch_first_run = False
                 for icao, rwy in rwy_cache.items():
-                    apch = rwy.get("approach_type", "")
-                    if not apch:
+                    approach_types = self._get_approach_types(rwy)
+                    if not approach_types:
                         continue
+                    apch_tuple = tuple(approach_types)
                     for gid in guilds_with_global:
-                        self.apch_last_notified[(gid, icao)] = apch
+                        self.apch_last_notified[(gid, icao)] = apch_tuple
                     for gid, airports in guild_watches.items():
                         if icao in airports:
-                            self.apch_last_notified[(gid, icao)] = apch
+                            self.apch_last_notified[(gid, icao)] = apch_tuple
                 logger.info("APCH TYPE監視開始（%d空港）", len(rwy_cache))
                 return
 
             # 通常ポーリング: 各空港 × 各ギルド を処理
             all_guild_ids = set(guild_watches.keys()) | guilds_with_global
             for icao, rwy in rwy_cache.items():
-                apch = rwy.get("approach_type", "")
-                if not apch:
+                approach_types = self._get_approach_types(rwy)
+                if not approach_types:
                     continue
+                apch_tuple = tuple(approach_types)
                 rwy_in_use = rwy.get("runway_in_use", "")
                 observed = rwy.get("observed_at", "")
 
@@ -934,14 +936,18 @@ class SwimCog(commands.Cog):
                             applicable.append((bl, ts, te))
 
                         if applicable:
-                            if any(self._apch_matches_baseline(apch, bl) for bl, _, _ in applicable):
+                            if any(
+                                self._apch_matches_baseline(a, bl)
+                                for bl, _, _ in applicable
+                                for a in approach_types
+                            ):
                                 self.apch_last_notified.pop(key, None)
                                 continue
                             # どのbaselineにも一致しない → 通知
-                            if self.apch_last_notified.get(key) == apch:
+                            if self.apch_last_notified.get(key) == apch_tuple:
                                 continue
-                            prev_apch = self.apch_last_notified.get(key, "")
-                            self.apch_last_notified[key] = apch
+                            prev = self.apch_last_notified.get(key)
+                            self.apch_last_notified[key] = apch_tuple
 
                             ch_id = guild_channels.get(guild_id)
                             if not ch_id:
@@ -958,10 +964,11 @@ class SwimCog(commands.Cog):
                                 title=f"⚠️ APCH TYPE 変更 — {icao}",
                                 color=0xFF9900,
                             )
-                            embed.add_field(name="現在", value=apch, inline=True)
-                            embed.add_field(name="基準", value=" / ".join(bl_strs), inline=True)
+                            apch_display = "\n".join(approach_types)
                             if rwy_in_use:
-                                embed.add_field(name="使用滑走路", value=rwy_in_use, inline=True)
+                                apch_display += f"\nRWY: {rwy_in_use}"
+                            embed.add_field(name="現在", value=apch_display, inline=True)
+                            embed.add_field(name="基準", value=" / ".join(bl_strs), inline=True)
                             if observed:
                                 embed.set_footer(text=f"観測: {observed[:10]} {observed[11:16]}Z")
                             await channel.send(embed=embed)
@@ -971,11 +978,11 @@ class SwimCog(commands.Cog):
                             continue
                     if has_global:
                         # グローバルwatch: 変化検知のみ
-                        if self.apch_last_notified.get(key) == apch:
+                        if self.apch_last_notified.get(key) == apch_tuple:
                             continue
-                        prev_apch = self.apch_last_notified.get(key, "")
-                        self.apch_last_notified[key] = apch
-                        if not prev_apch:
+                        prev = self.apch_last_notified.get(key)
+                        self.apch_last_notified[key] = apch_tuple
+                        if not prev:
                             continue  # 初回観測はキャッシュのみ
 
                         ch_id = guild_channels.get(guild_id)
@@ -989,17 +996,29 @@ class SwimCog(commands.Cog):
                             title=f"APCH TYPE 更新 — {icao}",
                             color=0x3498DB,
                         )
-                        embed.add_field(name="現在", value=apch, inline=True)
-                        if prev_apch:
-                            embed.add_field(name="前回", value=prev_apch, inline=True)
+                        apch_display = "\n".join(approach_types)
                         if rwy_in_use:
-                            embed.add_field(name="使用滑走路", value=rwy_in_use, inline=True)
+                            apch_display += f"\nRWY: {rwy_in_use}"
+                        embed.add_field(name="現在", value=apch_display, inline=True)
+                        if prev:
+                            prev_display = "\n".join(prev) if isinstance(prev, tuple) else str(prev)
+                            embed.add_field(name="前回", value=prev_display, inline=True)
                         if observed:
                             embed.set_footer(text=f"観測: {observed[:10]} {observed[11:16]}Z")
                         await channel.send(embed=embed)
 
         except Exception:
             logger.exception("APCHポーリングエラー")
+
+    @staticmethod
+    def _get_approach_types(rwy):
+        """RWY-INFOからapproach_typesを取得。フォールバック付き。"""
+        types = rwy.get("approach_types")
+        if types:
+            return types
+        # approach_types未対応 (SWIM API更新前) のフォールバック
+        apch = rwy.get("approach_type", "")
+        return [apch] if apch else []
 
     @staticmethod
     def _apch_matches_baseline(approach_type, baseline):
