@@ -664,6 +664,7 @@ class SwimCog(commands.Cog):
                 approach_types = self._get_approach_types(rwy_data)
                 dep_rwy = rwy_data.get("dep_rwy")
                 ldg_rwy = rwy_data.get("ldg_rwy")
+                rwy_in_use = rwy_data.get("runway_in_use")
                 if approach_types:
                     parts.append(f"**APCH TYPE:** {approach_types[0]}" if len(approach_types) == 1
                                  else "**APCH TYPE:**\n" + "\n".join(approach_types))
@@ -671,6 +672,8 @@ class SwimCog(commands.Cog):
                     parts.append(f"**DEP RWY:** {dep_rwy}")
                 if ldg_rwy:
                     parts.append(f"**LDG RWY:** {ldg_rwy}")
+                if rwy_in_use:
+                    parts.append(f"**USING RWY:** {rwy_in_use}")
 
             if not parts:
                 await interaction.followup.send(f"**{icao_input}** のRWY-INFO・METARデータがありません。")
