@@ -946,7 +946,6 @@ class SwimCog(commands.Cog):
                             # どのbaselineにも一致しない → 通知
                             if self.apch_last_notified.get(key) == apch_tuple:
                                 continue
-                            prev = self.apch_last_notified.get(key)
                             self.apch_last_notified[key] = apch_tuple
 
                             ch_id = guild_channels.get(guild_id)
