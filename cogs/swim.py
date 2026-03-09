@@ -601,10 +601,11 @@ class SwimCog(commands.Cog):
                 if metar_data:
                     parts.append(f"**METAR:**\n{metar_data.get('raw_text', '')}")
                 if rwy_data:
-                    apch = rwy_data.get("approach_type")
+                    approach_types = self._get_approach_types(rwy_data)
                     rwy_in_use = rwy_data.get("runway_in_use")
-                    if apch:
-                        parts.append(f"**APCH TYPE:** {apch}")
+                    if approach_types:
+                        parts.append(f"**APCH TYPE:** {approach_types[0]}" if len(approach_types) == 1
+                                     else "**APCH TYPE:**\n" + "\n".join(approach_types))
                     if rwy_in_use:
                         parts.append(f"**USING RWY:** {rwy_in_use}")
 
