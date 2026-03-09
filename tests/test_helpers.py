@@ -265,6 +265,61 @@ class TestApchMatchesBaseline:
         assert any(SwimCog._apch_matches_baseline(a, "RNAV") for a in approach_types) is False
 
 
+# ── _baseline_matches_approaches ────────────────────────────────
+
+class TestBaselineMatchesApproaches:
+    def test_single_baseline_match(self):
+        """単一baselineがapproach_typesのいずれかにマッチ"""
+        assert SwimCog._baseline_matches_approaches("ILS", ["ILS X RWY34L", "HIGHWAY VISUAL RWY34R"]) is True
+
+    def test_single_baseline_no_match(self):
+        assert SwimCog._baseline_matches_approaches("RNAV", ["ILS X RWY34L", "HIGHWAY VISUAL RWY34R"]) is False
+
+    def test_set_baseline_all_match(self):
+        """セット条件: 全サブ条件がそれぞれマッチ"""
+        assert SwimCog._baseline_matches_approaches(
+            "ILS X RWY34L + HIGHWAY VISUAL RWY34R",
+            ["ILS X RWY34L", "HIGHWAY VISUAL RWY34R"]
+        ) is True
+
+    def test_set_baseline_partial_match(self):
+        """セット条件: 片方のみマッチ → False"""
+        assert SwimCog._baseline_matches_approaches(
+            "ILS X RWY34L + HIGHWAY VISUAL RWY34R",
+            ["ILS X RWY34L"]
+        ) is False
+
+    def test_set_baseline_partial_string(self):
+        """セット条件: 部分一致でもOK"""
+        assert SwimCog._baseline_matches_approaches(
+            "ILS + HIGHWAY",
+            ["ILS X RWY34L", "HIGHWAY VISUAL RWY34R"]
+        ) is True
+
+    def test_set_baseline_wildcard(self):
+        """ワイルドカードは常にFalse"""
+        assert SwimCog._baseline_matches_approaches("*", ["ILS X RWY34L"]) is False
+
+    def test_set_baseline_case_insensitive(self):
+        assert SwimCog._baseline_matches_approaches(
+            "ils x rwy34l + highway visual rwy34r",
+            ["ILS X RWY34L", "HIGHWAY VISUAL RWY34R"]
+        ) is True
+
+    def test_or_between_baselines(self):
+        """複数baseline(OR): セットと単一の混在"""
+        baselines = ["ILS X RWY34L + HIGHWAY VISUAL RWY34R", "RNP RWY16L"]
+        approaches_set = ["ILS X RWY34L", "HIGHWAY VISUAL RWY34R"]
+        approaches_single = ["RNP RWY16L"]
+        approaches_none = ["RNAV RWY22"]
+        # セット条件にマッチ
+        assert any(SwimCog._baseline_matches_approaches(bl, approaches_set) for bl in baselines) is True
+        # 単一条件にマッチ
+        assert any(SwimCog._baseline_matches_approaches(bl, approaches_single) for bl in baselines) is True
+        # どちらにもマッチしない
+        assert any(SwimCog._baseline_matches_approaches(bl, approaches_none) for bl in baselines) is False
+
+
 # ── _get_approach_types ─────────────────────────────────────────
 
 class TestGetApproachTypes:
