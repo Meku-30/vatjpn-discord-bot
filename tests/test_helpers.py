@@ -240,17 +240,18 @@ class TestParsePirepCoords:
 # ── _apch_matches_baseline ──────────────────────────────────────
 
 class TestApchMatchesBaseline:
-    def test_partial_match(self):
-        assert SwimCog._apch_matches_baseline("ILS Y RWY34L", "ILS") is True
+    def test_exact_match(self):
+        assert SwimCog._apch_matches_baseline("ILS Y RWY34L", "ILS Y RWY34L") is True
+
+    def test_partial_no_match(self):
+        """部分一致ではマッチしない（完全一致のみ）"""
+        assert SwimCog._apch_matches_baseline("ILS Y RWY34L", "ILS") is False
 
     def test_no_match(self):
         assert SwimCog._apch_matches_baseline("RNAV RWY22", "ILS") is False
 
     def test_case_insensitive(self):
-        assert SwimCog._apch_matches_baseline("ils y rwy34l", "ILS") is True
-
-    def test_exact_match(self):
-        assert SwimCog._apch_matches_baseline("ILS Y RWY34L", "ILS Y RWY34L") is True
+        assert SwimCog._apch_matches_baseline("ils y rwy34l", "ILS Y RWY34L") is True
 
     def test_wildcard_always_false(self):
         """watchモード ('*') は常にFalse（全変化を通知）"""
@@ -258,10 +259,10 @@ class TestApchMatchesBaseline:
         assert SwimCog._apch_matches_baseline("RNAV RWY22", "*") is False
 
     def test_multi_approach_any_match(self):
-        """approach_types配列のいずれかにマッチすればTrue"""
+        """approach_types配列のいずれかに完全一致すればTrue"""
         approach_types = ["ILS X RWY34L", "HIGHWAY VISUAL RWY34R"]
-        assert any(SwimCog._apch_matches_baseline(a, "ILS") for a in approach_types) is True
-        assert any(SwimCog._apch_matches_baseline(a, "VISUAL") for a in approach_types) is True
+        assert any(SwimCog._apch_matches_baseline(a, "ILS X RWY34L") for a in approach_types) is True
+        assert any(SwimCog._apch_matches_baseline(a, "HIGHWAY VISUAL RWY34R") for a in approach_types) is True
         assert any(SwimCog._apch_matches_baseline(a, "RNAV") for a in approach_types) is False
 
 
@@ -269,8 +270,12 @@ class TestApchMatchesBaseline:
 
 class TestBaselineMatchesApproaches:
     def test_single_baseline_match(self):
-        """単一baselineがapproach_typesのいずれかにマッチ"""
-        assert SwimCog._baseline_matches_approaches("ILS", ["ILS X RWY34L", "HIGHWAY VISUAL RWY34R"]) is True
+        """単一baselineがapproach_typesのいずれかに完全一致"""
+        assert SwimCog._baseline_matches_approaches("ILS X RWY34L", ["ILS X RWY34L", "HIGHWAY VISUAL RWY34R"]) is True
+
+    def test_single_baseline_partial_no_match(self):
+        """部分一致ではマッチしない"""
+        assert SwimCog._baseline_matches_approaches("ILS", ["ILS X RWY34L", "HIGHWAY VISUAL RWY34R"]) is False
 
     def test_single_baseline_no_match(self):
         assert SwimCog._baseline_matches_approaches("RNAV", ["ILS X RWY34L", "HIGHWAY VISUAL RWY34R"]) is False
@@ -289,12 +294,12 @@ class TestBaselineMatchesApproaches:
             ["ILS X RWY34L"]
         ) is False
 
-    def test_set_baseline_partial_string(self):
-        """セット条件: 部分一致でもOK"""
+    def test_set_baseline_partial_string_no_match(self):
+        """セット条件: 部分一致ではマッチしない（完全一致のみ）"""
         assert SwimCog._baseline_matches_approaches(
             "ILS + HIGHWAY",
             ["ILS X RWY34L", "HIGHWAY VISUAL RWY34R"]
-        ) is True
+        ) is False
 
     def test_set_baseline_wildcard(self):
         """ワイルドカードは常にFalse"""
@@ -362,9 +367,9 @@ class TestBaselineMatchesApproaches:
     def test_rwy_with_set_baseline(self):
         """rwy条件 + セット条件の組み合わせ"""
         assert SwimCog._baseline_matches_approaches(
-            "ILS + VISUAL", ["ILS RWY07", "VISUAL"], rwy="07", runway_in_use="RWY 07") is True
+            "ILS RWY07 + VISUAL", ["ILS RWY07", "VISUAL"], rwy="07", runway_in_use="RWY 07") is True
         assert SwimCog._baseline_matches_approaches(
-            "ILS + VISUAL", ["ILS RWY07", "VISUAL"], rwy="07", runway_in_use="RWY 25") is False
+            "ILS RWY07 + VISUAL", ["ILS RWY07", "VISUAL"], rwy="07", runway_in_use="RWY 25") is False
 
 
 # ── _parse_runway_in_use ──────────────────────────────────────
