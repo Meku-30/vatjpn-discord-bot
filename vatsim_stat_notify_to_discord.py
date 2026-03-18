@@ -48,6 +48,17 @@ vatsim_stat_retrieve_period = float(config["VATSIM_CONFIG"]["vatsim_stat_retriev
 vatsim_controller_callsign_filter_regex = config["VATSIM_CONFIG"]["vatsim_controller_callsign_filter_regex"]
 pattern = re.compile(vatsim_controller_callsign_filter_regex)
 
+# ── Dynamic polling interval ─────────────────────────────────────
+# Peak: UTC 06-15 (JST 15:00-00:59) — 管制官の活動時間帯
+# Off-peak: UTC 16-05 (JST 01:00-14:59) — ほぼ活動なし
+PEAK_HOURS_UTC = (6, 15)  # inclusive
+PEAK_POLL_INTERVAL = vatsim_stat_retrieve_period  # settings.ini の値 (30s)
+OFFPEAK_POLL_INTERVAL = 60  # seconds
+
+def is_peak_hour():
+    hour = datetime.now(timezone.utc).hour
+    return PEAK_HOURS_UTC[0] <= hour <= PEAK_HOURS_UTC[1]
+
 discord_bot_client_token = os.environ.get("DISCORD_BOT_TOKEN") or config.get("DISCORD_CONFIG", "discord_bot_client_token", fallback=None)
 if not discord_bot_client_token:
     logger.error("DISCORD_BOT_TOKEN 環境変数または settings.ini の discord_bot_client_token を設定してください。")
@@ -394,6 +405,11 @@ class VATJPNBot(commands.Bot):
                 log_session(disconnected[a])
         except Exception:
             logger.exception("ポーリングループエラー")
+        # 時間帯に応じてポーリング間隔を動的に変更
+        target = PEAK_POLL_INTERVAL if is_peak_hour() else OFFPEAK_POLL_INTERVAL
+        if self.polling_loop.seconds != target:
+            self.polling_loop.change_interval(seconds=target)
+            logger.info("ポーリング間隔を %ds に変更 (UTC %02d時)", target, datetime.now(timezone.utc).hour)
 
     @polling_loop.before_loop
     async def before_polling(self):

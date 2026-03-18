@@ -6,6 +6,7 @@ from vatsim_stat_notify_to_discord import (
     format_duration_seconds,
     get_rating_str,
     check_position_rating,
+    is_peak_hour,
 )
 from cogs.swim import (
     parse_time_range,
@@ -93,6 +94,46 @@ class TestIsInTimeRange:
             mock_dt.now.return_value = _mock_utc(12, 0)
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             assert is_in_time_range("09:00", "12:00") is False
+
+
+# ── is_peak_hour ────────────────────────────────────────────────
+
+class TestIsPeakHour:
+    def test_peak_start(self):
+        with patch("vatsim_stat_notify_to_discord.datetime") as mock_dt:
+            mock_dt.now.return_value = _mock_utc(6, 0)
+            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            assert is_peak_hour() is True
+
+    def test_peak_end(self):
+        with patch("vatsim_stat_notify_to_discord.datetime") as mock_dt:
+            mock_dt.now.return_value = _mock_utc(15, 59)
+            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            assert is_peak_hour() is True
+
+    def test_offpeak_after(self):
+        with patch("vatsim_stat_notify_to_discord.datetime") as mock_dt:
+            mock_dt.now.return_value = _mock_utc(16, 0)
+            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            assert is_peak_hour() is False
+
+    def test_offpeak_before(self):
+        with patch("vatsim_stat_notify_to_discord.datetime") as mock_dt:
+            mock_dt.now.return_value = _mock_utc(5, 59)
+            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            assert is_peak_hour() is False
+
+    def test_midnight(self):
+        with patch("vatsim_stat_notify_to_discord.datetime") as mock_dt:
+            mock_dt.now.return_value = _mock_utc(0, 0)
+            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            assert is_peak_hour() is False
+
+    def test_peak_mid(self):
+        with patch("vatsim_stat_notify_to_discord.datetime") as mock_dt:
+            mock_dt.now.return_value = _mock_utc(12, 0)
+            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            assert is_peak_hour() is True
 
 
 # ── format_duration_seconds ──────────────────────────────────────
