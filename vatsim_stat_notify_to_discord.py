@@ -372,7 +372,7 @@ class VATJPNBot(commands.Bot):
         # VATSIMデータキャッシュ（ポーリングで取得したデータをコマンドから再利用）
         self._vatsim_cache = {}  # 最新のcontrollers_map
         self._vatsim_cache_full = {}  # 最新のフルレスポンス（pilots, prefiles含む）
-        self._vatsim_etag = None  # ETag for conditional requests
+        self._vatsim_last_modified = None  # Last-Modified for conditional requests
 
     async def setup_hook(self):
         timeout = aiohttp.ClientTimeout(total=10)
@@ -453,10 +453,10 @@ def get_old():
         return {}
 
 async def get_new(http_session):
-    """VATSIMデータを取得。ETag対応で変更なし時はNoneを返す。エラー時も前回データを維持するためNoneを返す。"""
+    """VATSIMデータを取得。Last-Modified対応で変更なし時はNoneを返す。エラー時も前回データを維持するためNoneを返す。"""
     headers = {}
-    if bot._vatsim_etag:
-        headers["If-None-Match"] = bot._vatsim_etag
+    if bot._vatsim_last_modified:
+        headers["If-Modified-Since"] = bot._vatsim_last_modified
     try:
         async with http_session.get(vatsim_stat_json_url, headers=headers) as resp:
             if resp.status == 304:
@@ -464,9 +464,9 @@ async def get_new(http_session):
             if resp.status != 200:
                 logger.warning("VATSIM API HTTP %d", resp.status)
                 return None
-            etag = resp.headers.get("ETag")
-            if etag:
-                bot._vatsim_etag = etag
+            last_modified = resp.headers.get("Last-Modified")
+            if last_modified:
+                bot._vatsim_last_modified = last_modified
             vatsim_info = await resp.json()
     except (asyncio.TimeoutError, aiohttp.ClientError):
         logger.warning("VATSIM APIリクエスト失敗")
