@@ -8,7 +8,8 @@ import os
 import logging
 import io
 from datetime import datetime, timezone
-from staticmap import StaticMap, CircleMarker
+StaticMap = None
+CircleMarker = None
 from vatsim_stat_notify_to_discord import get_db, pirep_channel_id, swim_api_url, swim_api_token
 
 logger = logging.getLogger("vatjpn-bot")
@@ -350,6 +351,9 @@ JAPAN_REF = (138, 36)  # 本州中部
 
 def generate_pirep_map(lat, lon):
     """PIREP位置のスタティックマップを生成し、discord.Fileとして返す。"""
+    global StaticMap, CircleMarker
+    if StaticMap is None:
+        from staticmap import StaticMap, CircleMarker
     m = StaticMap(400, 300, url_template="https://tile.openstreetmap.org/{z}/{x}/{y}.png")
     m.add_marker(CircleMarker((lon, lat), "red", 12))
 

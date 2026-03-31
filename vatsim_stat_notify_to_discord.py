@@ -367,11 +367,14 @@ async def check_solo_registration(http_session, callsign, cid, current_list=None
 class VATJPNBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
-        super().__init__(command_prefix="!", intents=intents)
+        intents.guild_messages = False
+        intents.dm_messages = False
+        intents.message_content = False
+        super().__init__(command_prefix="!", intents=intents, max_messages=None)
         self.http_session = None
         # VATSIMデータキャッシュ（ポーリングで取得したデータをコマンドから再利用）
-        self._vatsim_cache = {}  # 最新のcontrollers_map
-        self._vatsim_cache_full = {}  # 最新のフルレスポンス（pilots, prefiles含む）
+        self._vatsim_cache = {}  # 最新のcontrollers_map（callsign -> controller dict）
+        self._vatsim_controllers_list = []  # 最新のcontrollersリスト（/online, /sup用）
         self._vatsim_last_modified = None  # Last-Modified for conditional requests
 
     async def setup_hook(self):
@@ -477,9 +480,9 @@ async def get_new(http_session):
 
     controllers = vatsim_info.get("controllers", [])
     controllers_map = {c["callsign"]: c for c in controllers}
-    # フルレスポンスをキャッシュ（/online, /sup, /traffic用）
+    # controllersのみキャッシュ（/online, /sup用。/trafficはオンデマンド取得）
     bot._vatsim_cache = controllers_map
-    bot._vatsim_cache_full = vatsim_info
+    bot._vatsim_controllers_list = controllers
     return controllers_map
 
 async def get_controllers(http_session):
@@ -634,11 +637,11 @@ async def help_command(interaction: discord.Interaction):
 async def online_command(interaction: discord.Interaction):
     await interaction.response.defer()
     try:
-        vatsim_info = bot._vatsim_cache_full
-        if not vatsim_info:
+        controllers = bot._vatsim_controllers_list
+        if not controllers:
             async with bot.http_session.get(vatsim_stat_json_url) as resp:
                 vatsim_info = await resp.json()
-        controllers = vatsim_info.get("controllers", [])
+            controllers = vatsim_info.get("controllers", [])
         jp_controllers = [c for c in controllers if pattern.match(c["callsign"]) and c["rating"] > 1]
 
         if not jp_controllers:
@@ -709,11 +712,11 @@ bot.tree.add_command(nickname_group)
 async def sup_command(interaction: discord.Interaction):
     await interaction.response.defer()
     try:
-        vatsim_info = bot._vatsim_cache_full
-        if not vatsim_info:
+        controllers = bot._vatsim_controllers_list
+        if not controllers:
             async with bot.http_session.get(vatsim_stat_json_url) as resp:
                 vatsim_info = await resp.json()
-        controllers = vatsim_info.get("controllers", [])
+            controllers = vatsim_info.get("controllers", [])
         sups = [c for c in controllers if c["rating"] >= 11]
 
         if not sups:
@@ -744,10 +747,9 @@ async def traffic_command(interaction: discord.Interaction, icao: str):
     await interaction.response.defer()
     try:
         icao = icao.upper()
-        vatsim_info = bot._vatsim_cache_full
-        if not vatsim_info:
-            async with bot.http_session.get(vatsim_stat_json_url) as resp:
-                vatsim_info = await resp.json()
+        # pilots/prefilesはメモリ節約のためキャッシュせずオンデマンド取得
+        async with bot.http_session.get(vatsim_stat_json_url) as resp:
+            vatsim_info = await resp.json()
 
         pilots = vatsim_info.get("pilots", [])
         prefiles = vatsim_info.get("prefiles", [])
