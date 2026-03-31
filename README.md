@@ -2,10 +2,11 @@
 
 VATSIM 日本空域の ATC 管制官のオンライン/オフライン状況を Discord チャンネルに通知する Bot。
 
-- VATSIM Data API を15秒間隔で非同期ポーリング (aiohttp)
+- VATSIM Data API を動的間隔で非同期ポーリング (aiohttp) — ピーク時30秒/オフピーク時60秒
 - 日本空域 (RJ*, ROAH, OKA, FUK, KOJ, TYO, HDK, SRK, VATJ 等) のコントローラーを監視
 - ログイン/ログアウト時に Discord Embed で通知
 - 起動時の設定ファイルバリデーション
+- メモリ最適化: Intents最小化、メッセージキャッシュ無効化、Pillow遅延インポート、VATSIMキャッシュはcontrollersのみ保持
 
 ## スラッシュコマンド / Slash Commands
 
