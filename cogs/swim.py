@@ -853,7 +853,8 @@ class SwimCog(commands.Cog):
                 logger.info("PIREP監視開始（既存MOD+: %d件をスキップ）", len(mod_plus))
                 return
 
-            # 通常: 新規PIREPのみ通知
+            # 通常: 新規PIREPのみ通知（観測時間順）
+            mod_plus.sort(key=lambda p: p.get("observed_at", ""))
             for p in mod_plus:
                 cn = p["control_number"]
                 if cn in self.pirep_notified:
