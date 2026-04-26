@@ -86,7 +86,8 @@ def init_db():
     global _db_conn
     _db_conn = sqlite3.connect(stats_db_filename, check_same_thread=False)
     c = _db_conn.cursor()
-    c.execute("PRAGMA journal_mode=WAL")
+    # journal_mode=DELETE: WAL/-shmファイルを使わない。Docker file-only bind mountとの併用でWALがコンテナ overlay 側に残り破損を招いたため (2026-04 障害)
+    c.execute("PRAGMA journal_mode=DELETE")
     c.execute("""CREATE TABLE IF NOT EXISTS sessions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         cid INTEGER,
