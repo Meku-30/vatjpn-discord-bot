@@ -17,9 +17,10 @@ VATSIM 日本空域の管制官オンライン/オフライン状況を Discord 
 
 ## デプロイ
 
-- **デプロイ先**: NAS `<NAS_DATA_PATH>/discord-bot/bot1`
-- **Docker Compose**: `<NAS_CONTAINER_STATION>/data/application/phase6-bots/`
-- **稼働コンテナ**: `discord_bot_1`, `discord_bot_2`
+自宅 NAS 上の Docker で稼働 (コンテナ 2 台構成)。
+
+**具体的なデプロイパス・ホスト情報はこの Public リポジトリには書かない。**
+プライベートな `homelab/NAS-SERVICES.md` を参照すること。
 
 ## 機能
 
