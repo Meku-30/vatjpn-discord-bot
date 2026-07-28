@@ -9,3 +9,6 @@ __pycache__/
 nicknames.json
 stats.db
 user_list.csv
+
+# Claude Code ローカル設定・worktree
+.claude/
