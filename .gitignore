@@ -12,3 +12,7 @@ user_list.csv
 
 # Claude Code ローカル設定・worktree
 .claude/
+
+# Public リポジトリに載せない内部ドキュメント (ローカルには保持)
+CLAUDE.md
+docs/plans/

@@ -113,7 +113,8 @@ services:
       - ./settings.ini:/app/settings.ini:ro
       - ./data.json:/app/data.json
       - ./nicknames.json:/app/nicknames.json
-      - ./stats.db:/app/stats.db
+      # SQLite DB は「ディレクトリ」でマウントする (下記 Note 参照)
+      - ./db/:/app/db/
     environment:
       - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
       - SWIM_API_URL=${SWIM_API_URL}
@@ -126,6 +127,10 @@ services:
 ```
 
 > **Note:** スクリプト本体をボリュームマウント (`:ro`) することで、コード更新時は `docker compose restart` だけで反映されます。`docker compose build` が必要なのは `requirements.txt` や `Dockerfile` を変更した場合のみです。
+
+> **⚠️ SQLite DB のマウントについて:** `stats.db` を**ファイル単体で bind mount しないでください**。SQLite はジャーナル/WAL のために `stats.db-journal` や `stats.db-wal` といった兄弟ファイルをディレクトリ内に作成するため、ファイル単体マウントでは書き込みに失敗したり DB が破損したりします。上記のように `db/` ディレクトリごとマウントし、`settings.ini` で `stats_db_filename=db/stats.db` を指定してください。
+>
+> なお、マウント定義を追加・変更した場合は `docker compose restart` ではコンテナが再作成されないため、`docker compose up -d` を実行してください。
 
 ## Credits
 

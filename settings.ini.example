@@ -11,7 +11,8 @@ discord_channel_id=YOUR_CHANNEL_ID
 [DATAFILE_CONFIG]
 data_filename=data.json
 nickname_filename=nicknames.json
-stats_db_filename=stats.db
+# Docker 運用時はディレクトリごとマウントした db/ 配下を指定する (ファイル単体マウントは DB 破損の原因)
+stats_db_filename=db/stats.db
 
 # NOTAM/ATIS/METAR/PIREP/APCH features require SWIM API credentials in environment variables:
 #   SWIM_API_URL=your_swim_api_url
